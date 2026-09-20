@@ -129,23 +129,11 @@ aiops/llm_tasks.py
 aiops/pipeline_ext.py
 ```
 
-### 已有结果
-
-历史 dataset-level 提交：
+### 当前结果
 
 ```text
-总分: 0.3260273972602739
-AD:   0.3260273972602739
-RCA:  0.0
-Major: 0.0
-Minor: 0.0
-```
-
-注意：
-
-```text
-该分数是 dataset-level 结果，不是正式 incident-level 结果。
-B 的 incident-level 版本目前应在自跑自用链中重新生成。
+B 的正式 incident-level 结果尚未生成。
+等待自跑自用链完成后补充。
 ```
 
 ---
@@ -349,7 +337,7 @@ threshold = 0.7
 | 实验 | 是否使用 GNN | 第二阶段无监督 | 当前分数 | 说明 |
 |---|---|---|---|---|
 | A | 是 | 无 | high 27.3163 / low 1.4676 | 基础版本 |
-| B | 是 + Teacher | 无 | dataset-level 0.3260 | incident-level 待重跑 |
+| B | 是 + Teacher | 无 | 待生成 | 等待自跑自用 incident-level 结果 |
 | C | 否 | 无 | high 27.8234 / low 0.3646 | 非严格版本，使用了 B artifacts |
 | D | 是 | 异常降权 | 待跑 | 自跑自用 |
 | E | 是 | 异常剔除 | 待跑 | 自跑自用 |
