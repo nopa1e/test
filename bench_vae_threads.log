@@ -1,0 +1,7 @@
+torch 2.5.1+cu124 default threads 32
+  threads=  1     47.62 ms/batch   354 batches/epoch ->    16.9 s/epoch
+  threads=  2     87.62 ms/batch   354 batches/epoch ->    31.0 s/epoch
+  threads=  4     73.78 ms/batch   354 batches/epoch ->    26.1 s/epoch
+  threads=  8    122.36 ms/batch   354 batches/epoch ->    43.3 s/epoch
+  threads= 16    820.25 ms/batch   354 batches/epoch ->   290.4 s/epoch
+  threads= 32   2190.10 ms/batch   354 batches/epoch ->   775.3 s/epoch

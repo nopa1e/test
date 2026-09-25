@@ -1,0 +1,107 @@
+note: RAG / predictive / contradiction modules are not implemented yet; the --disable-* flags are accepted but have no effect.
+[F] torch.set_num_threads(1)
+[FE] 2026-09-23T00:27:59+00:00 xian_20260819040000_20260902040000: 381 incidents
+[FE]   {'incidents': 381, 'metric_evidence_incidents': 260, 'routing_evidence_incidents': 130, 'scrape_zero_up': 180, 'syslog_events': 91, 'syslog_templates': 4, 'syslog_programs': ['ospf6d', 'bgpd']}
+[FE] 2026-09-23T00:29:02+00:00 evidence done in 0h01m02s
+{
+  "node_metrics": {
+    "rows_read": 181352,
+    "nodes": 9,
+    "fields_used": [
+      "cpu_usage",
+      "load1",
+      "load5",
+      "memory_available_ratio",
+      "swap_used_ratio",
+      "disk_read_rate",
+      "disk_write_rate",
+      "disk_io_util",
+      "filesystem_used_ratio",
+      "inode_used_ratio",
+      "open_fd_ratio",
+      "process_count"
+    ],
+    "time_range": [
+      "2026-08-19T04:00:00+00:00",
+      "2026-09-02T03:59:00+00:00"
+    ]
+  },
+  "interface_metrics": {
+    "rows_read": 1208720,
+    "interfaces": 10,
+    "fields_used": [
+      "rx_bytes_rate",
+      "tx_bytes_rate",
+      "rx_packets_rate",
+      "tx_packets_rate",
+      "rx_drop_rate",
+      "tx_drop_rate",
+      "rx_error_rate",
+      "tx_error_rate",
+      "carrier_changes"
+    ]
+  },
+  "routing_metrics": {
+    "rows_read": 5074510,
+    "metric_names": 15,
+    "metric_names_list": [
+      "bgp_command_success",
+      "bgp_peer_count",
+      "bgp_peer_prefix_received",
+      "bgp_peer_prefix_sent",
+      "bgp_peer_up",
+      "bgp_peer_uptime_seconds",
+      "ipv6_default_route_changed_total",
+      "ipv6_default_route_info",
+      "ipv6_route_change_total",
+      "ipv6_route_count",
+      "ipv6_route_exists",
+      "ipv6_route_nexthop_info",
+      "ospf6_interface_cost",
+      "ospf6_interface_enabled",
+      "ospf6_neighbor_state_code"
+    ],
+    "missing_from_spec": [],
+    "label_only_present": [
+      "bgp_command_success",
+      "bgp_peer_count",
+      "bgp_peer_prefix_sent",
+      "ipv6_default_route_changed_total",
+      "ipv6_default_route_info",
+      "ipv6_route_exists",
+      "ipv6_route_nexthop_info",
+      "ospf6_interface_cost"
+    ],
+    "nodes": [
+      "br-1",
+      "br-2",
+      "cr-1",
+      "cr-2"
+    ]
+  },
+  "scrape_health": {
+    "rows_read": 262080,
+    "exporters": [
+      "node_exporter",
+      "routing_exporter"
+    ],
+    "targets": 13,
+    "fields_used": [
+      "scrape_up",
+      "scrape_samples",
+      "scrape_duration_seconds"
+    ]
+  },
+  "frr_syslog_events": {
+    "rows_read": 91,
+    "programs": [
+      "bgpd",
+      "ospf6d"
+    ],
+    "templates": 4,
+    "semantic_classes": [
+      "error",
+      "up"
+    ]
+  }
+}

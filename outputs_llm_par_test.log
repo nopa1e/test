@@ -1,0 +1,174 @@
+2026-09-20 07:15:44,102 | INFO    | aiops.pipeline | discovered 1 datasets
+2026-09-20 07:15:44,102 | INFO    | aiops.pipeline | ======================================================================
+2026-09-20 07:15:44,102 | INFO    | aiops.pipeline | running dataset shenyang_20260819040000_20260902040000 (shenyang)
+2026-09-20 07:15:44,102 | INFO    | aiops.features | building point table for shenyang_20260819040000_20260902040000
+/202131510121/lyt/aiops_diagnosis/aiops/features.py:112: UserWarning: Boolean Series key will be reindexed to match DataFrame index.
+  df = df[~(cum_mask & df["value"].isna())].copy()
+2026-09-20 07:16:15,426 | INFO    | aiops.features | point table shenyang_20260819040000_20260902040000 rows=36278 nodes=9 features=142
+2026-09-20 07:16:15,984 | INFO    | aiops.anomaly | fitting IsolationForest on 36278 points x 109 features
+2026-09-20 07:16:16,949 | INFO    | aiops.anomaly | training VAE on 36278 points x 109 features
+2026-09-20 07:18:00,686 | INFO    | aiops.anomaly | VAE epoch 1/2 loss=1.115207
+2026-09-20 07:19:34,031 | INFO    | aiops.anomaly | VAE epoch 2/2 loss=0.330958
+2026-09-20 07:19:41,788 | INFO    | aiops.anomaly | first stage done: if_mean=0.5000 vae_mean=0.5000 pseudo_normal=27208 pseudo_anomaly=3628
+2026-09-20 07:19:42,166 | INFO    | aiops.topology | shenyang_20260819040000_20260902040000: ip->node map has 9 addresses covering 9 nodes
+2026-09-20 07:20:00,412 | INFO    | aiops.topology | shenyang_20260819040000_20260902040000: routing evidence rows=1652324 ospf=14 bgp=4 routes=60
+2026-09-20 07:21:48,944 | INFO    | aiops.topology | shenyang_20260819040000_20260902040000: netflow rows=34595845 -> 21 observed edges (full file)
+2026-09-20 07:21:48,977 | INFO    | aiops.topology | shenyang_20260819040000_20260902040000: entity graph 9 nodes / 48 directed edges, evidence={'netflow': 42, 'ospf': 28, 'route': 62}
+2026-09-20 07:21:50,085 | INFO    | aiops.graph | point graph shenyang_20260819040000_20260902040000: 36278 points, 282080 edges (36269 temporal, 193420 topology), min_conf=0.00
+2026-09-20 07:21:59,805 | INFO    | aiops.gnn | GNN epoch 1/2 loss=0.677867 cls=0.665690 reg=0.040589 smooth=0.000011
+2026-09-20 07:22:06,489 | INFO    | aiops.gnn | GNN epoch 2/2 loss=0.648458 cls=0.636057 reg=0.041329 smooth=0.000034
+2026-09-20 07:22:13,701 | INFO    | aiops.pipeline | saved artifacts for shenyang_20260819040000_20260902040000 -> outputs_llm_par_test/shenyang_20260819040000_20260902040000
+2026-09-20 07:22:16,773 | INFO    | aiops.episode | episode build: 663 episodes from 36278 points (threshold=0.8031)
+2026-09-20 07:28:03,494 | INFO    | aiops.incident | incidentization: 663 episodes -> 607 incidents
+2026-09-20 07:28:05,016 | INFO    | aiops.llm_tasks | task A: 50 pairs, 8 parallel workers
+2026-09-20 07:28:37,467 | INFO    | aiops.llm_tasks | task A progress 10/50 pairs
+2026-09-20 07:28:56,785 | INFO    | aiops.llm_tasks | task A progress 20/50 pairs
+2026-09-20 07:29:16,852 | INFO    | aiops.llm_tasks | task A progress 30/50 pairs
+2026-09-20 07:29:38,291 | INFO    | aiops.llm_tasks | task A progress 40/50 pairs
+2026-09-20 07:30:03,736 | INFO    | aiops.llm_tasks | task A progress 50/50 pairs
+2026-09-20 07:30:28,470 | INFO    | aiops.rca_features | rca features: 607 rows for 607 incidents
+2026-09-20 07:30:28,539 | INFO    | aiops.llm_teacher | LLM teacher: 12 cases to label, 8 parallel workers
+2026-09-20 07:31:09,545 | INFO    | aiops.llm_teacher | LLM teacher progress 10/12 labels=5 discarded=5
+2026-09-20 07:31:14,597 | INFO    | aiops.llm_teacher | LLM teacher progress 12/12 labels=5 discarded=7
+2026-09-20 07:31:14,608 | INFO    | aiops.llm_teacher | LLM teacher wrote 5 labels (7 discarded)
+2026-09-20 07:32:54,079 | WARNING | aiops.pipeline | LLM diagnosis failed for shenyang_20260819040000_20260902040000; using rule fallback: 'int' object is not subscriptable
+2026-09-20 07:32:54,084 | INFO    | aiops.pipeline | dataset shenyang_20260819040000_20260902040000 prediction: {"prediction_id": "pred_000001", "start_time": "2026-08-25T18:35:00.000+00:00", "end_time": "2026-08-25T18:45:00.000+00:00", "root_cause_top5": [{"rank": 1, "network_element_id": "shenyang-br-1"}, {"rank": 2, "network_element_id": "shenyang-cr-1"}, {"rank": 3, "network_element_id": "shenyang-fw"}, {"rank": 4, "network_element_id": "shenyang-service-vm-1"}, {"rank": 5, "network_element_id": "shenyang-br-2"}], "fault_category": {"major_category": "firewall", "sub_category": "rate_limit"}}
+2026-09-20 07:32:54,111 | INFO    | aiops.pipeline | all done. summary: outputs_llm_par_test/_all/run_summary.json
+{
+  "results": [
+    {
+      "dataset": "shenyang_20260819040000_20260902040000",
+      "region_code": "shenyang",
+      "output_dir": "outputs_llm_par_test/shenyang_20260819040000_20260902040000",
+      "prediction": {
+        "prediction_id": "pred_000001",
+        "start_time": "2026-08-25T18:35:00.000+00:00",
+        "end_time": "2026-08-25T18:45:00.000+00:00",
+        "root_cause_top5": [
+          {
+            "rank": 1,
+            "network_element_id": "shenyang-br-1"
+          },
+          {
+            "rank": 2,
+            "network_element_id": "shenyang-cr-1"
+          },
+          {
+            "rank": 3,
+            "network_element_id": "shenyang-fw"
+          },
+          {
+            "rank": 4,
+            "network_element_id": "shenyang-service-vm-1"
+          },
+          {
+            "rank": 5,
+            "network_element_id": "shenyang-br-2"
+          }
+        ],
+        "fault_category": {
+          "major_category": "firewall",
+          "sub_category": "rate_limit"
+        }
+      },
+      "top_nodes": [
+        {
+          "network_element_id": "shenyang-br-1",
+          "anomaly_score": 0.8,
+          "root_cause_score": 0.8,
+          "source": "rca_gnn"
+        },
+        {
+          "network_element_id": "shenyang-cr-1",
+          "anomaly_score": 0.8,
+          "root_cause_score": 0.8,
+          "source": "rca_gnn"
+        },
+        {
+          "network_element_id": "shenyang-fw",
+          "anomaly_score": 0.8,
+          "root_cause_score": 0.8,
+          "source": "rca_gnn"
+        },
+        {
+          "network_element_id": "shenyang-service-vm-1",
+          "anomaly_score": 0.8,
+          "root_cause_score": 0.8,
+          "source": "rca_gnn"
+        },
+        {
+          "network_element_id": "shenyang-br-2",
+          "anomaly_score": 0.0,
+          "root_cause_score": 0.0,
+          "source": "rca_gnn"
+        }
+      ],
+      "experiment": {
+        "experiment_mode": "full",
+        "artifacts": {
+          "episode_scores": "episode_scores.csv",
+          "incident_candidates": "incident_candidates.json",
+          "incident_clusters": "incident_clusters.json",
+          "incident_correlation": "incident_correlation.json",
+          "propagation_graph": "propagation_graph.json",
+          "rca_features": "rca_features.csv",
+          "llm_pseudo_labels": "llm_pseudo_labels.jsonl",
+          "teacher_stats": "teacher_stats.json",
+          "rca_scores": "rca_scores.csv",
+          "llm_verification": "llm_verification.jsonl",
+          "llm_verification_high": "llm_verification_high.jsonl",
+          "llm_verification_low": "llm_verification_low.jsonl"
+        },
+        "counts": {
+          "episode_count": 663,
+          "incident_count": 607,
+          "incident_correlation_pairs": 50,
+          "rca_feature_rows": 607,
+          "teacher_labels": 5,
+          "llm_verified_incidents": 5,
+          "llm_high_confidence_incidents": 0,
+          "llm_low_confidence_incidents": 5
+        },
+        "node_scores_override": [
+          {
+            "network_element_id": "shenyang-br-1",
+            "root_cause_score": 0.8
+          },
+          {
+            "network_element_id": "shenyang-cr-1",
+            "root_cause_score": 0.8
+          },
+          {
+            "network_element_id": "shenyang-fw",
+            "root_cause_score": 0.8
+          },
+          {
+            "network_element_id": "shenyang-service-vm-1",
+            "root_cause_score": 0.8
+          },
+          {
+            "network_element_id": "shenyang-br-2",
+            "root_cause_score": 0.0
+          },
+          {
+            "network_element_id": "shenyang-cr-2",
+            "root_cause_score": 0.0
+          },
+          {
+            "network_element_id": "shenyang-service-vm-2",
+            "root_cause_score": 0.0
+          },
+          {
+            "network_element_id": "shenyang-service-vm-3",
+            "root_cause_score": 0.0
+          },
+          {
+            "network_element_id": "shenyang-traffic-vm",
+            "root_cause_score": 0.0
+          }
+        ]
+      }
+    }
+  ],
+  "summary_path": "outputs_llm_par_test/_all/run_summary.json"
+}

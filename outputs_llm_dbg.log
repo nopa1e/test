@@ -1,0 +1,52 @@
+2026-09-20 07:50:47,331 | INFO    | aiops.pipeline | ======================================================================
+2026-09-20 07:50:47,331 | INFO    | aiops.pipeline | running dataset shenyang_20260819040000_20260902040000 (shenyang)
+2026-09-20 07:50:47,331 | INFO    | aiops.features | building point table for shenyang_20260819040000_20260902040000
+/202131510121/lyt/aiops_diagnosis/aiops/features.py:112: UserWarning: Boolean Series key will be reindexed to match DataFrame index.
+  df = df[~(cum_mask & df["value"].isna())].copy()
+2026-09-20 07:51:14,863 | INFO    | aiops.features | point table shenyang_20260819040000_20260902040000 rows=36278 nodes=9 features=142
+2026-09-20 07:51:15,430 | INFO    | aiops.anomaly | fitting IsolationForest on 36278 points x 109 features
+2026-09-20 07:51:16,417 | INFO    | aiops.anomaly | training VAE on 36278 points x 109 features
+2026-09-20 07:52:55,088 | INFO    | aiops.anomaly | VAE epoch 1/1 loss=0.460099
+2026-09-20 07:52:58,491 | INFO    | aiops.anomaly | first stage done: if_mean=0.5000 vae_mean=0.5000 pseudo_normal=27208 pseudo_anomaly=3628
+2026-09-20 07:52:58,863 | INFO    | aiops.topology | shenyang_20260819040000_20260902040000: ip->node map has 9 addresses covering 9 nodes
+2026-09-20 07:53:17,201 | INFO    | aiops.topology | shenyang_20260819040000_20260902040000: routing evidence rows=1652324 ospf=14 bgp=4 routes=60
+2026-09-20 07:53:19,772 | INFO    | aiops.topology | shenyang_20260819040000_20260902040000: netflow rows=5000 -> 8 observed edges (sampled)
+2026-09-20 07:53:19,785 | INFO    | aiops.topology | shenyang_20260819040000_20260902040000: entity graph 9 nodes / 36 directed edges, evidence={'netflow': 16, 'ospf': 28, 'route': 44}
+2026-09-20 07:53:20,707 | INFO    | aiops.graph | point graph shenyang_20260819040000_20260902040000: 36278 points, 282080 edges (36269 temporal, 145054 topology), min_conf=0.00
+2026-09-20 07:53:28,585 | INFO    | aiops.gnn | GNN epoch 1/1 loss=0.733351 cls=0.719180 reg=0.047235 smooth=0.000005
+2026-09-20 07:53:34,962 | INFO    | aiops.pipeline | saved artifacts for shenyang_20260819040000_20260902040000 -> /202131510121/lyt/aiops_diagnosis/outputs_llm_dbg/shenyang_20260819040000_20260902040000
+2026-09-20 07:53:38,233 | INFO    | aiops.episode | episode build: 658 episodes from 36278 points (threshold=0.7758)
+2026-09-20 07:59:08,823 | INFO    | aiops.incident | incidentization: 658 episodes -> 606 incidents
+2026-09-20 07:59:09,945 | INFO    | aiops.llm_tasks | task A: 50 pairs, 8 parallel workers
+2026-09-20 07:59:48,742 | INFO    | aiops.llm_tasks | task A progress 10/50 pairs
+2026-09-20 08:00:09,648 | INFO    | aiops.llm_tasks | task A progress 20/50 pairs
+2026-09-20 08:00:32,538 | INFO    | aiops.llm_tasks | task A progress 30/50 pairs
+2026-09-20 08:01:01,934 | INFO    | aiops.llm_tasks | task A progress 40/50 pairs
+2026-09-20 08:01:25,228 | INFO    | aiops.llm_tasks | task A progress 50/50 pairs
+2026-09-20 08:07:20,518 | INFO    | aiops.rca_features | rca features: 606 rows for 606 incidents
+2026-09-20 08:07:20,673 | INFO    | aiops.llm_teacher | LLM teacher: 100 cases to label, 8 parallel workers
+2026-09-20 08:07:59,728 | INFO    | aiops.llm_teacher | LLM teacher progress 10/100 labels=3 discarded=7
+2026-09-20 08:08:21,084 | INFO    | aiops.llm_teacher | LLM teacher progress 20/100 labels=5 discarded=15
+2026-09-20 08:08:49,007 | INFO    | aiops.llm_teacher | LLM teacher progress 30/100 labels=11 discarded=19
+2026-09-20 08:09:17,099 | INFO    | aiops.llm_teacher | LLM teacher progress 40/100 labels=15 discarded=25
+2026-09-20 08:09:52,078 | INFO    | aiops.llm_teacher | LLM teacher progress 50/100 labels=18 discarded=32
+2026-09-20 08:10:13,062 | INFO    | aiops.llm_teacher | LLM teacher progress 60/100 labels=24 discarded=36
+2026-09-20 08:10:37,014 | INFO    | aiops.llm_teacher | LLM teacher progress 70/100 labels=26 discarded=44
+2026-09-20 08:11:06,658 | INFO    | aiops.llm_teacher | LLM teacher progress 80/100 labels=29 discarded=51
+2026-09-20 08:11:37,000 | INFO    | aiops.llm_teacher | LLM teacher progress 90/100 labels=32 discarded=58
+2026-09-20 08:12:08,296 | INFO    | aiops.llm_teacher | LLM teacher progress 100/100 labels=34 discarded=66
+2026-09-20 08:12:08,313 | INFO    | aiops.llm_teacher | LLM teacher wrote 34 labels (66 discarded)
+### TRACEBACK FROM diagnose_dataset ###
+Traceback (most recent call last):
+  File "/202131510121/lyt/aiops_diagnosis/_llm_debug.py", line 20, in wrapped
+    return _orig(*a, **k)
+  File "/202131510121/lyt/aiops_diagnosis/aiops/llm_diagnoser.py", line 567, in diagnose_dataset
+    user_text = _evidence_text(evidence, node_scores)
+  File "/202131510121/lyt/aiops_diagnosis/aiops/llm_diagnoser.py", line 278, in _evidence_text
+    for e in (evidence.get("topology", {}) or {}).get("edges", [])[:60]:
+TypeError: 'int' object is not subscriptable
+### END TRACEBACK ###
+2026-09-20 08:14:23,818 | WARNING | aiops.pipeline | LLM diagnosis failed for shenyang_20260819040000_20260902040000; using rule fallback: 'int' object is not subscriptable
+2026-09-20 08:14:23,823 | INFO    | aiops.pipeline | dataset shenyang_20260819040000_20260902040000 prediction: {"prediction_id": "dbg", "start_time": "2026-08-24T02:40:00.000+00:00", "end_time": "2026-08-24T02:50:00.000+00:00", "root_cause_top5": [{"rank": 1, "network_element_id": "shenyang-fw"}, {"rank": 2, "network_element_id": "shenyang-br-1"}, {"rank": 3, "network_element_id": "shenyang-br-2"}, {"rank": 4, "network_element_id": "shenyang-cr-1"}, {"rank": 5, "network_element_id": "shenyang-cr-2"}], "fault_category": {"major_category": "firewall", "sub_category": "rate_limit"}}
+### RUN OK ###
+prediction: {'prediction_id': 'dbg', 'start_time': '2026-08-24T02:40:00.000+00:00', 'end_time': '2026-08-24T02:50:00.000+00:00', 'root_cause_top5': [{'rank': 1, 'network_element_id': 'shenyang-fw'}, {'rank': 2, 'network_element_id': 'shenyang-br-1'}, {'rank': 3, 'network_element_id': 'shenyang-br-2'}, {'rank': 4, 'network_element_id': 'shenyang-cr-1'}, {'rank': 5, 'network_element_id': 'shenyang-cr-2'}], 'fault_category': {'major_category': 'firewall', 'sub_category': 'rate_limit'}}
