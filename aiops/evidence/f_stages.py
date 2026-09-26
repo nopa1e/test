@@ -624,6 +624,18 @@ def stage_predictive(args: argparse.Namespace) -> int:
     print(f"[FP] {_now()} done in {_hms(time.time() - started)}", flush=True)
     return 0
 
+#: node_metrics columns grouped by the resource sub-category they imply.  Used
+#: only when no routing evidence names the fault: metric evidence covers every
+#: incident (554/554 on xian), whereas routing evidence covers a minority, so
+#: this is what actually widens category coverage.
+_METRIC_FAMILY = (
+    ("cpu_pressure", ("cpu_usage", "load1", "load5")),
+    ("memory_pressure", ("memory_available_ratio", "swap_used_ratio")),
+    ("disk_space_low", ("filesystem_used_ratio", "inode_used_ratio")),
+    ("disk_io_pressure", ("disk_io_util", "disk_read_rate", "disk_write_rate")),
+    ("process_pressure", ("process_count",)),
+)
+
 #: Routing metric hints that map onto a judge sub-category (spec 5.2's table).
 #: All of them live under the judge's ``routing`` major category (README).
 _ROUTING_SUBS = {
@@ -637,15 +649,25 @@ _ROUTING_SUBS = {
 }
 
 
-def _infer_category(routing_ev: dict, iid: str, node: str, fallback: dict) -> dict:
-    """Category for one prediction, from the evidence that supported its top candidate.
+def _infer_category(
+    routing_ev: dict,
+    metric_ev: dict,
+    iid: str,
+    node: str,
+    fallback: dict,
+) -> dict:
+    """Category for one prediction, from the evidence supporting its top candidate.
 
-    The judge's vocabulary is closed (see the submission README), and spec 5.2
-    notes that routing metric names map almost one-to-one onto routing
-    sub-categories -- so when the top candidate carries routing evidence we can
-    name the sub-category instead of repeating the base run's single guess.
-    Anything else keeps the base category: inventing a sub-category we cannot
-    support would only add noise, and a wrong sub-category scores zero anyway.
+    Evidence is consulted strongest-first, and every branch only fires when the
+    evidence can actually name a category in the judge's closed vocabulary:
+
+    1. **routing** -- metric names map almost one-to-one onto routing
+       sub-categories (spec 5.2), so this is the most specific signal available;
+    2. **metric** -- node_metrics column names imply a resource sub-category.
+       Weaker than routing (a hot CPU may be a symptom), but metric evidence
+       covers *every* incident, so it is what widens coverage;
+    3. otherwise keep the base run's category -- inventing an unsupported
+       sub-category would only add noise, and a wrong one scores zero anyway.
     """
     incident = ((routing_ev or {}).get("incidents") or {}).get(iid) or {}
     for event in incident.get("events") or []:
@@ -654,6 +676,20 @@ def _infer_category(routing_ev: dict, iid: str, node: str, fallback: dict) -> di
         sub = event.get("hints_sub_category")
         if sub in _ROUTING_SUBS:
             return {"major_category": "routing", "sub_category": sub, "source": "routing_evidence"}
+
+    metrics = (((metric_ev or {}).get("incidents") or {}).get(iid) or {}).get("nodes") or {}
+    payload = metrics.get(node) or {}
+    ranked = payload.get("top_metrics") or []
+    for entry in ranked[:3]:
+        name = str(entry.get("metric") or "")
+        for sub, columns in _METRIC_FAMILY:
+            if name in columns:
+                return {
+                    "major_category": "resource",
+                    "sub_category": sub,
+                    "source": "metric_evidence",
+                }
+
     return {**fallback, "source": "base"}
 
 def stage_finalize(args: argparse.Namespace) -> int:
@@ -690,12 +726,14 @@ def stage_finalize(args: argparse.Namespace) -> int:
         base_pred = _load_json(artifacts / ds.name / "prediction.json")
         category = base_pred.get("fault_category") or {}
         routing_ev = _load_json(out_root / ds.name / "routing_evidence.json")
+        metric_ev = _load_json(out_root / ds.name / "metric_evidence.json")
         rerank = _load_json(out_root / ds.name / "llm_rerank.json")
         region = getattr(ds, "region_code", None) or ds.name.split("_", 1)[0]
 
         records: list[dict] = []
         used_llm = 0
         used_evidence_category = 0
+        category_sources: dict[str, int] = {}
         for incident in incidents:
             iid = str(incident.get("incident_id"))
             payload = (candidates.get("incidents") or {}).get(iid) or {}
@@ -710,8 +748,12 @@ def stage_finalize(args: argparse.Namespace) -> int:
             for node in order:
                 if node not in seen:
                     seen.append(node)
-            inferred = _infer_category(routing_ev, iid, seen[0] if seen else "", category)
-            if inferred.get("source") == "routing_evidence":
+            inferred = _infer_category(
+                routing_ev, metric_ev, iid, seen[0] if seen else "", category
+            )
+            src = inferred.get("source", "base")
+            category_sources[src] = category_sources.get(src, 0) + 1
+            if src != "base":
                 used_evidence_category += 1
             records.append(
                 {
@@ -739,6 +781,7 @@ def stage_finalize(args: argparse.Namespace) -> int:
             "file": str(out),
             "records_from_llm_rerank": used_llm,
             "records_with_evidence_category": used_evidence_category,
+            "category_source_counts": dict(category_sources),
             "category": category,
         }
         print(f"[FIN] {ds.name}: {len(records)} records (llm={used_llm}) -> {out.name}", flush=True)
