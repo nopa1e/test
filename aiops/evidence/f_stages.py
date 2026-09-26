@@ -360,6 +360,21 @@ def stage_prompt_ablation(args: argparse.Namespace) -> int:
             region=region,
             limit=args.ablation_limit,
         )
+
+        # Persist variant A's per-incident ranking.  A is the production prompt
+        # (B strips the dependency block, C rewords and reorders), and it is
+        # what ``--stage finalize`` consumes.  Without this write the ablation
+        # produced statistics only -- 9.5 h of GPU time that could never reach a
+        # submission file, because finalize silently fell back to RootScore.
+        variant_a = per_variant.get("A") or {}
+        if variant_a.get("incidents"):
+            (out_dir / "llm_rerank.json").write_text(
+                json.dumps(variant_a, ensure_ascii=False), encoding="utf-8"
+            )
+            print(
+                f"[PA]   wrote llm_rerank.json for {len(variant_a['incidents'])} incidents",
+                flush=True,
+            )
         deterministic = {
             str(incident.get("incident_id")): deterministic_first_movers(
                 str(incident.get("incident_id")),
@@ -609,6 +624,38 @@ def stage_predictive(args: argparse.Namespace) -> int:
     print(f"[FP] {_now()} done in {_hms(time.time() - started)}", flush=True)
     return 0
 
+#: Routing metric hints that map onto a judge sub-category (spec 5.2's table).
+#: All of them live under the judge's ``routing`` major category (README).
+_ROUTING_SUBS = {
+    "bgp_session_down",
+    "bgp_route_flap",
+    "ospf6_neighbor_down",
+    "ospf6_cost_anomaly",
+    "blackhole",
+    "wrong_default_route",
+    "wrong_static_route",
+}
+
+
+def _infer_category(routing_ev: dict, iid: str, node: str, fallback: dict) -> dict:
+    """Category for one prediction, from the evidence that supported its top candidate.
+
+    The judge's vocabulary is closed (see the submission README), and spec 5.2
+    notes that routing metric names map almost one-to-one onto routing
+    sub-categories -- so when the top candidate carries routing evidence we can
+    name the sub-category instead of repeating the base run's single guess.
+    Anything else keeps the base category: inventing a sub-category we cannot
+    support would only add noise, and a wrong sub-category scores zero anyway.
+    """
+    incident = ((routing_ev or {}).get("incidents") or {}).get(iid) or {}
+    for event in incident.get("events") or []:
+        if event.get("node") != node:
+            continue
+        sub = event.get("hints_sub_category")
+        if sub in _ROUTING_SUBS:
+            return {"major_category": "routing", "sub_category": sub, "source": "routing_evidence"}
+    return {**fallback, "source": "base"}
+
 def stage_finalize(args: argparse.Namespace) -> int:
     """Write submission-format JSONL in the judge's own schema.
 
@@ -642,11 +689,13 @@ def stage_finalize(args: argparse.Namespace) -> int:
         candidates = _load_json(out_root / ds.name / "candidates.json")
         base_pred = _load_json(artifacts / ds.name / "prediction.json")
         category = base_pred.get("fault_category") or {}
+        routing_ev = _load_json(out_root / ds.name / "routing_evidence.json")
         rerank = _load_json(out_root / ds.name / "llm_rerank.json")
         region = getattr(ds, "region_code", None) or ds.name.split("_", 1)[0]
 
         records: list[dict] = []
         used_llm = 0
+        used_evidence_category = 0
         for incident in incidents:
             iid = str(incident.get("incident_id"))
             payload = (candidates.get("incidents") or {}).get(iid) or {}
@@ -661,6 +710,9 @@ def stage_finalize(args: argparse.Namespace) -> int:
             for node in order:
                 if node not in seen:
                     seen.append(node)
+            inferred = _infer_category(routing_ev, iid, seen[0] if seen else "", category)
+            if inferred.get("source") == "routing_evidence":
+                used_evidence_category += 1
             records.append(
                 {
                     "prediction_id": f"f_{iid}",
@@ -671,8 +723,8 @@ def stage_finalize(args: argparse.Namespace) -> int:
                         for rank, node in enumerate(seen[:5], start=1)
                     ],
                     "fault_category": {
-                        "major_category": category.get("major_category", ""),
-                        "sub_category": category.get("sub_category", ""),
+                        "major_category": inferred["major_category"],
+                        "sub_category": inferred["sub_category"],
                     },
                 }
             )
@@ -686,6 +738,7 @@ def stage_finalize(args: argparse.Namespace) -> int:
             "records": len(records),
             "file": str(out),
             "records_from_llm_rerank": used_llm,
+            "records_with_evidence_category": used_evidence_category,
             "category": category,
         }
         print(f"[FIN] {ds.name}: {len(records)} records (llm={used_llm}) -> {out.name}", flush=True)
