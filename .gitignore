@@ -8,3 +8,9 @@ venv/
 .env
 *.key
 *.pem
+
+# 实验产物与日志（体积大，不入库）
+outputs_experiment_*/
+f_logs/
+*.jsonl
+*.bak-*

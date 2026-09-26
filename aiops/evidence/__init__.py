@@ -20,6 +20,7 @@ from .metric_evidence import build_metric_evidence
 from .routing_evidence import ROUTING_METRIC_HINTS, build_routing_evidence
 from .quality_evidence import build_quality_evidence
 from .log_evidence import build_log_evidence
+from .flow_evidence import ELEPHANT_FLOW_TYPE, build_flow_evidence
 
 __all__ = [
     "TABLE_KINDS",
@@ -33,5 +34,7 @@ __all__ = [
     "build_routing_evidence",
     "build_quality_evidence",
     "build_log_evidence",
+    "build_flow_evidence",
+    "ELEPHANT_FLOW_TYPE",
     "ROUTING_METRIC_HINTS",
 ]

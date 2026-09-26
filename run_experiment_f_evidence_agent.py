@@ -41,6 +41,7 @@ from aiops.evidence import (
     build_quality_evidence,
     build_routing_evidence,
 )
+from aiops.evidence import f_stages
 
 #: Tables consumed by the Step-2 evidence modules.  The two flow tables
 #: (netflow_5tuple, traffic_flow_metrics) join in spec step 4, so the coverage
@@ -215,6 +216,17 @@ def stage_evidence(args: argparse.Namespace) -> int:
         out_dir = out_root / ds.name
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # F expands the node set before the evidence modules run.  Measured on
+        # xian, every incident carries exactly one element and evidence is
+        # incident-scoped, so without this spec 5.9's ranking has nothing to
+        # rank (candidate set would be a single node with zero competitors).
+        incidents = f_stages.expand_incidents_with_topology(
+            incidents,
+            f_stages.load_adjacency(artifacts / ds.name),
+        )
+        print(f"[FE]   node set expanded for ranking: {len(incidents[0].get('nodes') or [])} nodes/incident",
+              flush=True)
+
         metric_ev = build_metric_evidence(ds, incidents, usage)
         routing_ev = build_routing_evidence(ds, incidents, usage)
         quality_ev = build_quality_evidence(ds, usage)
@@ -273,12 +285,16 @@ def stage_evidence(args: argparse.Namespace) -> int:
 #: (``C:\Users\Cyber\Downloads\workspace``), so every chain script has to pass
 #: ``--workspace`` explicitly.  F defaults to the real data root when it exists
 #: so a bare invocation does not silently discover zero datasets.
-F_DEFAULT_WORKSPACE = "/202131510121/lyt/workspace"
+#: The project moved to a new container on 2026-09-25.  The old path stays as a
+#: fallback so this entry point keeps working either way.
+F_DEFAULT_WORKSPACE = "/202531630503/lyt/workspace"
+F_LEGACY_WORKSPACE = "/202131510121/lyt/workspace"
 
 
 def _default_workspace() -> str:
-    if os.path.isdir(F_DEFAULT_WORKSPACE):
-        return F_DEFAULT_WORKSPACE
+    for candidate in (F_DEFAULT_WORKSPACE, F_LEGACY_WORKSPACE):
+        if os.path.isdir(candidate):
+            return candidate
     return str(PipelineConfig().workspace)
 
 
@@ -294,7 +310,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Base-run artifacts root for the evidence stage "
                         "(defaults to --output-dir).")
     p.add_argument("--stage", default="f6_base",
-                   choices=["f6_base", "evidence"],
+                   choices=["f6_base", "evidence", "candidates", "f1_stability", "prompt_ablation", "flow", "predictive", "finalize"],
                    help="Which F stage to run.  Built up one step at a time.")
     p.add_argument("--bin-minutes", type=int, default=F_BIN_MINUTES)
     p.add_argument("--episode-max-gap-minutes", type=int, default=F_EPISODE_MAX_GAP_MINUTES)
@@ -318,6 +334,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--disable-rag", action="store_true")
     p.add_argument("--disable-predictive", action="store_true")
     p.add_argument("--disable-contradiction", action="store_true")
+    # Step 5.9 / F1 (spec 4.1) knobs.
+    p.add_argument("--top-k", type=int, default=10, help="Candidates kept before the evidence filter.")
+    p.add_argument("--n-repeats", type=int, default=20, help="Perturbation repeats for the F1 stability test.")
+    p.add_argument("--drop-fraction", type=float, default=0.05, help="Share of evidence dropped per repeat.")
+    p.add_argument("--metrics-dir", default=None, help="F1 output dir (default: <output-dir>/f1_metrics).")
+    p.add_argument("--ablation-limit", type=int, default=40, help="Incidents per region for the spec-4.2 prompt ablation (single region ~10 min).")
+    p.add_argument("--max-lag-minutes", type=int, default=5, help="Spec 5.7 lag ceiling for the predictive (cause vs victim) evidence.")
+    p.add_argument("--final-dir", default=None, help="Submission JSONL output dir (default: <output-dir>/final).")
     args = p.parse_args(argv)
     args._started_at = _now()
     if args.coarse_pass_minutes:
@@ -344,6 +368,18 @@ def main(argv: list[str] | None = None) -> int:
         return stage_f6_base(args)
     if args.stage == "evidence":
         return stage_evidence(args)
+    if args.stage == "candidates":
+        return f_stages.stage_candidates(args)
+    if args.stage == "f1_stability":
+        return f_stages.stage_f1_stability(args)
+    if args.stage == "prompt_ablation":
+        return f_stages.stage_prompt_ablation(args)
+    if args.stage == "flow":
+        return f_stages.stage_flow(args)
+    if args.stage == "predictive":
+        return f_stages.stage_predictive(args)
+    if args.stage == "finalize":
+        return f_stages.stage_finalize(args)
     raise SystemExit(f"unknown stage {args.stage!r}")
 
 
