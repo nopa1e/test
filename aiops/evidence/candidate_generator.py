@@ -411,7 +411,7 @@ def build_candidates(
             # predictive_explanation weight.
             for pair in ((predictive_ev.get("incidents") or {}).get(iid) or {}).get("pairs") or []:
                 target = canonical_node(pair.get("target"))
-                if target not in predictive:
+                if target not in predictive_raw:
                     continue
                 excess = float(pair.get("excess_change") or 0.0)
                 predictability = float(pair.get("normal_predictability") or 0.0)
