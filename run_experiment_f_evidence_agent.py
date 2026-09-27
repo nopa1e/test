@@ -342,6 +342,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--ablation-limit", type=int, default=40, help="Incidents per region for the spec-4.2 prompt ablation (single region ~10 min).")
     p.add_argument("--max-lag-minutes", type=int, default=5, help="Spec 5.7 lag ceiling for the predictive (cause vs victim) evidence.")
     p.add_argument("--final-dir", default=None, help="Submission JSONL output dir (default: <output-dir>/final).")
+    p.add_argument("--seed", type=int, default=42, help="Random seed for the G discriminator (and any future stochastic stage).")
     args = p.parse_args(argv)
     args._started_at = _now()
     if args.coarse_pass_minutes:
