@@ -415,7 +415,15 @@ def build_candidates(
                     continue
                 excess = float(pair.get("excess_change") or 0.0)
                 predictability = float(pair.get("normal_predictability") or 0.0)
-                predictive[target] = max(predictive[target], max(0.0, excess) * predictability)
+                predictive_raw[target] = max(
+                    predictive_raw[target], max(0.0, excess) * predictability
+                )
+        # ``excess_change`` carries physical units, so it can be 80+ -- every
+        # other sub-score lives in [0, 1], and feeding the raw value in let this
+        # one term dominate the whole RootScore (observed: 13.19 on wuhan, and
+        # 12 hard samples above 1.0 domain-wide).  Min-max it like
+        # ``local_anomaly`` so the seven terms stay comparable.
+        predictive = minmax(predictive_raw)
         if contradiction_ev:
             for node, value in ((contradiction_ev.get("incidents") or {}).get(iid) or {}).get("nodes", {}).items():
                 if canonical_node(node) in contradiction:
