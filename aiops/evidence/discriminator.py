@@ -167,7 +167,7 @@ def _fit_if_vae(matrix: np.ndarray, *, seed: int = 42, epochs: int = 40, latent:
     forest = IsolationForest(n_estimators=200, contamination="auto", random_state=seed)
     forest.fit(matrix)
     if_score = -forest.score_samples(matrix)  # higher = more anomalous
-    if_score = (if_score - if_score.min()) / max(1e-9, if_score.ptp())
+    if_score = (if_score - if_score.min()) / max(1e-9, np.ptp(if_score))
 
     x = torch.tensor(matrix, dtype=torch.float32)
     hidden = max(8, d * 2)
@@ -196,7 +196,7 @@ def _fit_if_vae(matrix: np.ndarray, *, seed: int = 42, epochs: int = 40, latent:
     with torch.no_grad():
         recon = decoder(encoder(x))
         vae_err = ((recon - x) ** 2).mean(dim=1).numpy()
-    vae_err = (vae_err - vae_err.min()) / max(1e-9, vae_err.ptp())
+    vae_err = (vae_err - vae_err.min()) / max(1e-9, np.ptp(vae_err))
 
     combined = 0.5 * if_score + 0.5 * vae_err
     return combined, if_score, vae_err
@@ -237,7 +237,7 @@ def run_discriminator(
     combined, if_score, vae_err = _fit_if_vae(matrix, seed=seed)
     # "Authenticity" = the opposite of anomalous-within-predictions, and it is
     # what a positive RootScore weight needs.
-    authenticity = 1.0 - (combined - combined.min()) / max(1e-9, combined.ptp())
+    authenticity = 1.0 - (combined - combined.min()) / max(1e-9, np.ptp(combined))
 
     frame = frame.assign(
         anomaly_score=combined,
