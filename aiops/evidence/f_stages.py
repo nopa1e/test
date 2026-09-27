@@ -847,13 +847,19 @@ def stage_g_discriminator(args: argparse.Namespace) -> int:
         (out_dir / "discriminator.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
         )
-        audit = result.get("audit") or {}
-        summary[ds.name] = audit
+        summary_data = result.get("summary") or {}
+        hard = result.get("hard_samples") or []
+        knowledge = result.get("knowledge") or []
+        summary[ds.name] = {
+            **summary_data,
+            "hard_samples_returned": len(hard),
+            "knowledge_entries": len(knowledge),
+        }
         print(
-            f"[G] {ds.name.split('_')[0]}: n={audit.get('n')} "
-            f"strong={audit.get('n_strong')} weak={audit.get('n_weak')} "
-            f"sep={audit.get('separation')} r(root)={audit.get('pearson_with_root_score')} "
-            f"-> {audit.get('verdict')}",
+            f"[G] {ds.name.split('_')[0]}: n={summary_data.get('n')} "
+            f"hard={summary_data.get('n_hard')} ({summary_data.get('hard_ratio')}) "
+            f"knowledge={len(knowledge)} "
+            f"r(anomaly,root)={summary_data.get('corr_anomaly_with_root_score')}",
             flush=True,
         )
 
