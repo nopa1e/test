@@ -575,6 +575,7 @@ def stage_predictive(args: argparse.Namespace) -> int:
             usage,
             adjacency=adjacency or None,
             max_lag_minutes=args.max_lag_minutes,
+            min_predictability=args.min_predictability,
         )
         (out_dir / "predictive_evidence.json").write_text(
             json.dumps(predictive, ensure_ascii=False), encoding="utf-8"

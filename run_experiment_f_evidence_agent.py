@@ -341,6 +341,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--metrics-dir", default=None, help="F1 output dir (default: <output-dir>/f1_metrics).")
     p.add_argument("--ablation-limit", type=int, default=40, help="Incidents per region for the spec-4.2 prompt ablation (single region ~10 min).")
     p.add_argument("--max-lag-minutes", type=int, default=5, help="Spec 5.7 lag ceiling for the predictive (cause vs victim) evidence.")
+    p.add_argument("--min-predictability", type=float, default=0.30, help="Spec 5.7 predictability floor for predictive evidence. Default 0.30 matches the original setting; lowering it (e.g. 0.10) keeps more candidate edges so more incidents get cause-vs-victim evidence. Chosen from data loss, never from the official score.")
     p.add_argument("--final-dir", default=None, help="Submission JSONL output dir (default: <output-dir>/final).")
     p.add_argument("--seed", type=int, default=42, help="Random seed for the G discriminator (and any future stochastic stage).")
     p.add_argument("--no-llm-rerank", action="store_true", help="finalize: ignore any llm_rerank.json and write the programmatic RootScore order (the production path).")
