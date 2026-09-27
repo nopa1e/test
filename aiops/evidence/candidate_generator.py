@@ -402,7 +402,7 @@ def build_candidates(
         modality_counts = {node: len(_modalities(slot)) for node, slot in store.items()}
         cross = {node: min(1.0, count / 3.0) for node, count in modality_counts.items()}
 
-        predictive = {node: 0.0 for node in store}
+        predictive_raw = {node: 0.0 for node in store}
         contradiction = {node: 0.0 for node in store}
         if predictive_ev:
             # The module emits directed pairs, not per-node values: a node whose
