@@ -73,16 +73,6 @@ LABEL_ONLY_METRICS: frozenset[str] = frozenset({
     "ipv6_default_route_info", "ipv6_default_route_changed_total",
 })
 
-#: Monotonic counters.  They only ever grow with wall-clock time, so a
-#: window-over-window *increase* is evidence of nothing: 40 minutes of elapsed
-#: time is enough to push any of them out of a baseline band measured over the
-#: preceding 40 minutes.  ``bgp_peer_uptime_seconds`` alone produced 29270 of
-#: the 30288 routing events (96.6%), all of them on br-1/br-2 -- and because a
-#: counter is *guaranteed* to fire at window[0], those two nodes then won every
-#: temporal tie-break, taking 50.5% of all top-1 slots off a 22.2% node base.
-#: Counters are checked for RESETS (a drop), never for growth.
-COUNTER_METRICS: frozenset[str] = frozenset({"bgp_peer_uptime_seconds"})
-
 
 def _clean_value(series: pd.Series) -> pd.Series:
     """Numeric parse that also treats the literal 'NULL' / '\\N' markers as missing."""
@@ -183,17 +173,8 @@ def build_routing_evidence(
                 a_max, a_min = float(np.max(a)), float(np.min(a))
                 if abs(a_max - b_med) <= 1e-9 and abs(a_min - b_med) <= 1e-9:
                     continue
-                if metric_name in COUNTER_METRICS:
-                    # A counter can never "rise abnormally" -- growth is wall
-                    # clock.  Only a drop means the session restarted, which is
-                    # the bgp_session_down case the hint already names.
-                    if a_min >= b_med:
-                        continue
-                    outside = inc_win[col][inc_win[col] < b_min]
-                    delta = a_min - b_med
-                else:
-                    outside = inc_win[col][(inc_win[col] > b_max) | (inc_win[col] < b_min)]
-                    delta = (a_max - b_med) if abs(a_max - b_med) >= abs(a_min - b_med) else (a_min - b_med)
+                outside = inc_win[col][(inc_win[col] > b_max) | (inc_win[col] < b_min)]
+                delta = (a_max - b_med) if abs(a_max - b_med) >= abs(a_min - b_med) else (a_min - b_med)
                 events.append({
                     "kind": "value_change",
                     "node": node,
