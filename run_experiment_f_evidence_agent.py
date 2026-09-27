@@ -343,6 +343,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--max-lag-minutes", type=int, default=5, help="Spec 5.7 lag ceiling for the predictive (cause vs victim) evidence.")
     p.add_argument("--final-dir", default=None, help="Submission JSONL output dir (default: <output-dir>/final).")
     p.add_argument("--seed", type=int, default=42, help="Random seed for the G discriminator (and any future stochastic stage).")
+    p.add_argument("--no-llm-rerank", action="store_true", help="finalize: ignore any llm_rerank.json and write the programmatic RootScore order (the production path).")
     args = p.parse_args(argv)
     args._started_at = _now()
     if args.coarse_pass_minutes:

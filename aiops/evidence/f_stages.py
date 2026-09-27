@@ -727,7 +727,14 @@ def stage_finalize(args: argparse.Namespace) -> int:
         category = base_pred.get("fault_category") or {}
         routing_ev = _load_json(out_root / ds.name / "routing_evidence.json")
         metric_ev = _load_json(out_root / ds.name / "metric_evidence.json")
-        rerank = _load_json(out_root / ds.name / "llm_rerank.json")
+        # ``--no-llm-rerank`` forces the programmatic RootScore order, which is
+        # the production path: the LLM re-rank cost a submission and did not pay
+        # for itself, so it must never be picked up by accident when present.
+        rerank = (
+            {}
+            if getattr(args, "no_llm_rerank", False)
+            else _load_json(out_root / ds.name / "llm_rerank.json")
+        )
         region = getattr(ds, "region_code", None) or ds.name.split("_", 1)[0]
 
         records: list[dict] = []
