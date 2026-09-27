@@ -637,6 +637,69 @@ _METRIC_FAMILY = (
     ("process_pressure", ("process_count",)),
 )
 
+#: 真协议信号 —— 只有这些 metric 能作为 routing 类别证据。
+#: ``bgp_peer_uptime_seconds`` 被刻意排除：它是单调计数器，窗口内时间流逝即必然
+#: 冲出基线区间，属钟表效应，不是故障（见 13.11 的实测记录）。
+_REAL_ROUTING_METRICS = {
+    "bgp_peer_up",
+    "bgp_peer_prefix_received",
+    "bgp_peer_prefix_sent",
+    "bgp_command_success",
+    "bgp_peer_count",
+    "ipv6_route_nexthop_info",
+    "ipv6_route_change_total",
+    "ipv6_route_exists",
+    "ipv6_route_count",
+    "ipv6_default_route_info",
+    "ipv6_default_route_changed_total",
+    "ospf6_neighbor_state_code",
+    "ospf6_interface_cost",
+    "ospf6_interface_enabled",
+}
+
+#: flow_type x 异常形态 -> judge 的 service 子类（README 的封闭词表）。
+_FLOW_ERROR_SUBS = {"web": "web_5xx", "dns": "dns_down", "auth": "auth_error"}
+_FLOW_SLOW_SUBS = {"web": "web_slow", "dns": "dns_wrong_record", "auth": "auth_timeout"}
+
+#: flow 异常判定阈值。
+_FLOW_ERROR_RATE_MIN = 0.01
+_FLOW_TIMEOUT_PER_MIN_MIN = 0.1
+_FLOW_SLOW_RATIO = 2.0
+
+
+def _flow_category(flow_ev: dict | None, iid: str) -> dict | None:
+    """service 子类判定，证据来自 traffic_flow_metrics 的跨区业务流。
+
+    web / dns / auth 三种 flow 的 error_rate、timeout 与 p95 延迟，直接对应
+    judge 词表里 service 大类的六个子类。取强度最高的那条边。
+    """
+    inc = ((flow_ev or {}).get("incidents") or {}).get(iid) or {}
+    edges = (inc.get("traffic_flow") or {}).get("edges") or []
+    best: tuple[float, str] | None = None
+    for e in edges:
+        ft = str(e.get("flow_type") or "")
+        er = e.get("error_rate_incident") or 0.0
+        to = e.get("timeout_per_min_incident") or 0.0
+        dp = e.get("duration_p95_incident")
+        db = e.get("duration_p95_baseline")
+        sub = None
+        strength = 0.0
+        if er > _FLOW_ERROR_RATE_MIN or to > _FLOW_TIMEOUT_PER_MIN_MIN:
+            sub = _FLOW_ERROR_SUBS.get(ft)
+            strength = float(er) * 10.0 + float(to)
+        elif db and dp and float(dp) > _FLOW_SLOW_RATIO * float(db):
+            sub = _FLOW_SLOW_SUBS.get(ft)
+            strength = float(dp) / float(db)
+        if sub and (best is None or strength > best[0]):
+            best = (strength, sub)
+    if best:
+        return {
+            "major_category": "service",
+            "sub_category": best[1],
+            "source": "flow_evidence",
+        }
+    return None
+
 #: Routing metric hints that map onto a judge sub-category (spec 5.2's table).
 #: All of them live under the judge's ``routing`` major category (README).
 _ROUTING_SUBS = {
@@ -656,6 +719,7 @@ def _infer_category(
     iid: str,
     node: str,
     fallback: dict,
+    flow_ev: dict | None = None,
 ) -> dict:
     """Category for one prediction, from the evidence supporting its top candidate.
 
@@ -671,9 +735,29 @@ def _infer_category(
        sub-category would only add noise, and a wrong one scores zero anyway.
     """
     incident = ((routing_ev or {}).get("incidents") or {}).get(iid) or {}
-    for event in incident.get("events") or []:
-        if event.get("node") != node:
+    events = [e for e in (incident.get("events") or []) if e.get("node") == node]
+
+    # 1. routing —— 只承认真协议信号。``bgp_peer_uptime_seconds`` 的钟表信号不算，
+    #    否则它恒真，会把后面所有分支都吃掉（这正是 F 只输出两个大类的原因）。
+    for event in events:
+        if str(event.get("metric_name")) not in _REAL_ROUTING_METRICS:
             continue
+        sub = event.get("hints_sub_category")
+        if sub in _ROUTING_SUBS:
+            return {
+                "major_category": "routing",
+                "sub_category": sub,
+                "source": "routing_evidence:real",
+            }
+
+    # 2. service —— traffic_flow_metrics 给出的 web/dns/auth 业务异常。
+    svc = _flow_category(flow_ev, iid)
+    if svc:
+        return svc
+
+    # 3. routing 钟表信号 —— 保留原有行为。它零信息但在统计上偏向真实高频根因
+    #    （13.12 实测：削弱它掉 1.048 分），故只在 service 无证据时才回退到它。
+    for event in events:
         sub = event.get("hints_sub_category")
         if sub in _ROUTING_SUBS:
             return {"major_category": "routing", "sub_category": sub, "source": "routing_evidence"}
@@ -728,6 +812,7 @@ def stage_finalize(args: argparse.Namespace) -> int:
         category = base_pred.get("fault_category") or {}
         routing_ev = _load_json(out_root / ds.name / "routing_evidence.json")
         metric_ev = _load_json(out_root / ds.name / "metric_evidence.json")
+        flow_ev = _load_json(out_root / ds.name / "flow_evidence.json")
         # ``--no-llm-rerank`` forces the programmatic RootScore order, which is
         # the production path: the LLM re-rank cost a submission and did not pay
         # for itself, so it must never be picked up by accident when present.
@@ -757,7 +842,7 @@ def stage_finalize(args: argparse.Namespace) -> int:
                 if node not in seen:
                     seen.append(node)
             inferred = _infer_category(
-                routing_ev, metric_ev, iid, seen[0] if seen else "", category
+                routing_ev, metric_ev, iid, seen[0] if seen else "", category, flow_ev
             )
             src = inferred.get("source", "base")
             category_sources[src] = category_sources.get(src, 0) + 1
