@@ -98,17 +98,31 @@ def _routing_observations(routing_ev: dict | None, iid: str) -> dict[str, list[t
     return store
 
 
-def _log_observations(log_ev: dict | None, wanted: set[str]) -> dict[str, list[tuple]]:
+def _log_observations(
+    log_ev: dict | None, wanted: set[str], start=None, end=None
+) -> dict[str, list[tuple]]:
+    """Log events must fall inside *this* incident's window.
+
+    They used not to be clipped at all, unlike the quality observations below.
+    Syslog carries events from days before an incident, so the median br log
+    stamp sat 5.6 days *before* the window opened -- which handed every
+    log-carrying node rank 1 in the first-mover order (measured: 1509/1509 for
+    br, 527/527 for cr).  Clipping removes a pure artefact of collection.
+    """
     store: dict[str, list[tuple]] = {}
     for event in (log_ev or {}).get("events") or []:
         node = canonical_node(event.get("node"))
+        if not node:
+            continue
         if wanted and node not in wanted:
             continue
-        _record(
-            store,
-            node,
-            event.get("time") or event.get("timestamp"),
-            f"log:{event.get('semantic_class') or event.get('program') or 'event'}",
+        ts = _to_ts(event.get("time") or event.get("timestamp"))
+        if ts is None:
+            continue
+        if start is not None and end is not None and not (start <= ts <= end):
+            continue
+        store.setdefault(node, []).append(
+            (ts, f"log:{event.get('semantic_class') or event.get('program') or 'event'}")
         )
     return store
 
@@ -162,7 +176,7 @@ def build_temporal_evidence(
         for partial in (
             _metric_observations(metric_ev, iid),
             _routing_observations(routing_ev, iid),
-            _log_observations(log_ev, set(nodes)),
+            _log_observations(log_ev, set(nodes), start, end),
             _quality_observations(quality_ev, start, end),
         ):
             for node, items in partial.items():
