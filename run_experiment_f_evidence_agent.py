@@ -310,7 +310,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Base-run artifacts root for the evidence stage "
                         "(defaults to --output-dir).")
     p.add_argument("--stage", default="f6_base",
-                   choices=["f6_base", "evidence", "candidates", "f1_stability", "prompt_ablation", "flow", "predictive", "finalize"],
+                   choices=["f6_base", "evidence", "candidates", "f1_stability", "prompt_ablation", "flow", "predictive", "finalize", "g_discriminator"],
                    help="Which F stage to run.  Built up one step at a time.")
     p.add_argument("--bin-minutes", type=int, default=F_BIN_MINUTES)
     p.add_argument("--episode-max-gap-minutes", type=int, default=F_EPISODE_MAX_GAP_MINUTES)
@@ -380,6 +380,8 @@ def main(argv: list[str] | None = None) -> int:
         return f_stages.stage_predictive(args)
     if args.stage == "finalize":
         return f_stages.stage_finalize(args)
+    if args.stage == "g_discriminator":
+        return f_stages.stage_g_discriminator(args)
     raise SystemExit(f"unknown stage {args.stage!r}")
 
 

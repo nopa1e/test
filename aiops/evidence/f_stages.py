@@ -805,3 +805,64 @@ def stage_finalize(args: argparse.Namespace) -> int:
     )
     print(f"[FIN] total {len(merged)} records -> {merged_path}", flush=True)
     return 0
+
+def stage_g_discriminator(args: argparse.Namespace) -> int:
+    """Experiment G: second-layer "is this a real fault" discriminator (方案 §14).
+
+    Fits on evidence-structure features the pipeline already produced -- no new
+    data reads, no LLM -- and audits the unsupervised score against cross-modal
+    agreement.  The audit is what decides whether weighting RootScore with it
+    could help; the module never deletes a prediction (spec 1.3: cutting rows is
+    worth 0~1 point in practice).
+    """
+    from .discriminator import run_discriminator
+
+    artifacts = Path(args.artifacts_dir)
+    out_root = Path(args.output_dir)
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    datasets = _matched(args)
+    if not datasets:
+        print(f"[G] no datasets matched regions={args.regions!r}", flush=True)
+        return 1
+
+    summary: dict[str, dict] = {}
+    started = time.time()
+    for ds in datasets:
+        incidents = _load_incidents(artifacts, ds.name)
+        if not incidents:
+            print(f"[G] {ds.name}: no incidents, skipping", flush=True)
+            continue
+        out_dir = out_root / ds.name
+        candidates = _load_json(out_dir / "candidates.json")
+        if not candidates:
+            print(f"[G] {ds.name}: needs --stage candidates first", flush=True)
+            continue
+        bundle = _evidence_bundle(out_dir)
+        bundle["temporal_ev"] = _load_json(out_dir / "temporal_evidence.json")
+        bundle["predictive_ev"] = _load_json(out_dir / "predictive_evidence.json")
+        bundle["contradiction_ev"] = _load_json(out_dir / "contradiction_evidence.json")
+
+        result = run_discriminator(ds, incidents, candidates, seed=args.seed, **bundle)
+        (out_dir / "discriminator.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
+        audit = result.get("audit") or {}
+        summary[ds.name] = audit
+        print(
+            f"[G] {ds.name.split('_')[0]}: n={audit.get('n')} "
+            f"strong={audit.get('n_strong')} weak={audit.get('n_weak')} "
+            f"sep={audit.get('separation')} r(root)={audit.get('pearson_with_root_score')} "
+            f"-> {audit.get('verdict')}",
+            flush=True,
+        )
+
+    (out_root / "discriminator_report.json").write_text(
+        json.dumps(
+            {"stage": "g_discriminator", "finished_at": _now(), "datasets": summary},
+            ensure_ascii=False, indent=2, default=str,
+        ),
+        encoding="utf-8",
+    )
+    print(f"[G] {_now()} done in {_hms(time.time() - started)}", flush=True)
+    return 0
