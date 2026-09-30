@@ -32,6 +32,7 @@ from typing import Any
 
 import pandas as pd
 
+from .cross_region import role_key
 from ..dataset import DatasetInfo, canonical_node
 from ..utils import get_logger
 from .root_score import ROOT_SCORE_WEIGHTS, combine, explain, minmax, rank_priority
@@ -217,6 +218,45 @@ def _collect_evidence(
     return {"nodes": store, "order": order}
 
 
+def _cr_key(ts: Any) -> str:
+    """把任意时间戳归一成 ``YYYY-MM-DD HH:MM:SS``（与 node_metrics 的键一致）。"""
+    s = str(ts).strip().replace("T", " ")
+    if "+" in s:
+        s = s.split("+", 1)[0]
+    if s.endswith("Z"):
+        s = s[:-1]
+    return s[:19]
+
+
+def _apply_cross_region(
+    local_raw: dict[str, float],
+    incident: Mapping[str, Any],
+    cross_region: Mapping[str, Any],
+) -> dict[str, float]:
+    """按 incident 窗口内的 CRCS 均值缩放各节点的 local 幅度。
+
+    CRCS 已在 ``build_cross_region.py`` 里做过「节点级中位归一 + 截断」，
+    因此这里的乘子落在 [CLAMP_LO, CLAMP_HI] 内（默认 [0.5, 1.5]），
+    含义是「此刻相对同角色其他区域，比它自己的常态更离群/更合群」。
+    """
+    roles = (cross_region.get("roles") or {})
+    if not roles:
+        return local_raw
+    tr = incident.get("time_range") or {}
+    start = _cr_key(tr.get("start") or incident.get("start") or "")
+    end = _cr_key(tr.get("end") or incident.get("end") or "")
+    out = dict(local_raw)
+    for node, base in local_raw.items():
+        pts = roles.get(role_key(node)) or {}
+        if not pts:
+            continue
+        vals = [v for ts, v in pts.items() if (not start or ts >= start) and (not end or ts <= end)]
+        if not vals:
+            continue
+        out[node] = base * (sum(vals) / len(vals))
+    return out
+
+
 def _local_magnitude(slot: Mapping[str, Any]) -> float:
     """Strongest relative change this node shows, across every modality.
 
@@ -314,6 +354,7 @@ def build_candidates(
     top_k: int = 10,
     filter_k: int = 5,
     max_nodes_per_incident: int = 10,
+    cross_region: dict | None = None,
 ) -> dict:
     """Build Top-10 / Top-5 candidates with their ``RootScore`` breakdown.
 
@@ -369,6 +410,15 @@ def build_candidates(
 
         # --- score families -------------------------------------------------
         local_raw = {node: _local_magnitude(slot) for node, slot in store.items()}
+        # --- 空间维修正（跨区域一致性）-------------------------------------
+        # spec 5.9 的七项权重是常数、不得调权；这里**不新增因子**，而是把
+        # ``local_anomaly`` 自身的度量补全：一个节点的异常幅度本就应当同时
+        # 看「相对自身历史」与「相对同角色其他区域」。实测同角色跨区域画像
+        # 距离只有异角色的 0.216 倍（见 aiops/evidence/cross_region.py），
+        # 故 8 个区域可互为空间 baseline。
+        # 默认关闭（cross_region=None），既有行为逐字节不变。
+        if cross_region:
+            local_raw = _apply_cross_region(local_raw, incident, cross_region)
         local = minmax(local_raw)
 
         timing = {node: (slot.get("timing") or {}) for node, slot in store.items()}

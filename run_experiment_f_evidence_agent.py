@@ -344,6 +344,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--min-predictability", type=float, default=0.30, help="Spec 5.7 predictability floor for predictive evidence. Default 0.30 matches the original setting; lowering it (e.g. 0.10) keeps more candidate edges so more incidents get cause-vs-victim evidence. Chosen from data loss, never from the official score.")
     p.add_argument("--final-dir", default=None, help="Submission JSONL output dir (default: <output-dir>/final).")
     p.add_argument("--seed", type=int, default=42, help="Random seed for the G discriminator (and any future stochastic stage).")
+    p.add_argument("--cross-region", action="store_true",
+                   help="candidates: 把跨区域一致性并入 local_anomaly 的度量"
+                        "（需先跑 build_cross_region.py 产出 cross_region_evidence.json；"
+                        "七项权重不变，默认关闭）")
     p.add_argument("--no-llm-rerank", action="store_true", help="finalize: ignore any llm_rerank.json and write the programmatic RootScore order (the production path).")
     args = p.parse_args(argv)
     args._started_at = _now()

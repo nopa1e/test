@@ -194,6 +194,17 @@ def stage_candidates(args: argparse.Namespace) -> int:
         # that are otherwise structurally zero (spec 5.9).
         bundle["predictive_ev"] = _load_json(out_dir / "predictive_evidence.json")
         bundle["contradiction_ev"] = _load_json(out_dir / "contradiction_evidence.json")
+        # 跨区域一致性（空间维）：仅当显式开启且预计算文件存在时启用，
+        # 否则 cross_region=None，候选与既有行为逐字节一致。
+        cross_region = None
+        if getattr(args, "cross_region", False):
+            cross_region = _load_json(out_dir / "cross_region_evidence.json")
+            if cross_region:
+                print(f"[FC] {ds.name}: cross-region ON "
+                      f"({len((cross_region.get('roles') or {}))} roles)", flush=True)
+            else:
+                print(f"[FC] {ds.name}: cross-region 请求但缺 cross_region_evidence.json，"
+                      f"回退为关闭", flush=True)
         if not bundle["metric_ev"]:
             print(f"[FC] {ds.name}: no evidence yet -- run --stage evidence first", flush=True)
             continue
@@ -213,6 +224,7 @@ def stage_candidates(args: argparse.Namespace) -> int:
         adjacency = _load_adjacency(out_dir)
         candidates = build_candidates(
             ds, incidents, temporal_ev=temporal_ev, top_k=args.top_k,
+            cross_region=cross_region,
             adjacency=adjacency, **bundle
         )
         (out_dir / "candidates.json").write_text(
