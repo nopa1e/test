@@ -65,18 +65,24 @@ def main() -> None:
     print(f"\nCRCS 序列数: {len(crcs)}")
     print(json.dumps(summarize(crcs), ensure_ascii=False, indent=1)[:800])
 
-    # 节点级归一化：除以其自身 CRCS 中位（消除"天生与别人不一样"的业务异质性），
-    # 再截断到 [CLAMP_LO, CLAMP_HI]。
+    # 节点级归一化：**rank（百分位）**，不是中位数相除。
+    # 中位归一失败过一次（commit 5aaba16 的实现）：它只消除"典型差异"，
+    # 不消除"波动幅度差异"。service-vm 的 CRCS 天然剧烈（p90 11.3 / std 14.3，
+    # 而 cr-1 只有 2.3 / 0.9），乘性因子于是放大了它的业务异质性，
+    # 把 top1 净推向 service-vm（br-1 −862、service-vm-2/3 +1274），
+    # 与"压制共模"的初衷南辕北辙。
+    # rank 归一让每个节点的因子分布都均匀落在 [CLAMP_LO, CLAMP_HI]，
+    # 含义收窄为唯一的那个问题：「此刻相对它自己的常态，是否更离群」。
     out_by_region: dict[str, dict] = defaultdict(dict)
     for (region, role), pts in crcs.items():
         if not pts:
             continue
-        vals = sorted(pts.values())
-        med = vals[len(vals) // 2] or 1.0
+        items = sorted(pts.items(), key=lambda kv: kv[1])
+        n = len(items)
         norm = {}
-        for ts, v in pts.items():
-            r = v / med
-            norm[ts] = CLAMP_LO if r < CLAMP_LO else (CLAMP_HI if r > CLAMP_HI else r)
+        for rank, (ts, _v) in enumerate(items):
+            frac = (rank + 0.5) / n            # 0..1 的百分位
+            norm[ts] = CLAMP_LO + frac * (CLAMP_HI - CLAMP_LO)
         out_by_region[region][role] = norm
 
     written = 0
@@ -85,7 +91,7 @@ def main() -> None:
             "dataset": ds.name,
             "region_code": ds.region_code,
             "metric": a.metric,
-            "method": "crcs_median_normalized_clamped",
+            "method": "crcs_rank_normalized_clamped",
             "clamp": [CLAMP_LO, CLAMP_HI],
             "roles": out_by_region.get(ds.region_code, {}),
         }
