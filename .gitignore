@@ -14,3 +14,7 @@ outputs_experiment_*/
 f_logs/
 *.jsonl
 *.bak-*
+
+# 目录整理后新增（2026-10-01）
+submissions/
+_archive/

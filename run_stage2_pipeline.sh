@@ -14,7 +14,7 @@ cd /202531630503/lyt/aiops_diagnosis
 
 WS=/202531630503/lyt/workspace/data2
 OUT=outputs_experiment_f_stage2
-LOG=/202531630503/lyt/f_logs
+LOG=/202531630503/lyt/aiops_diagnosis/f_logs
 SPAN=20260917040000_20260924040000
 ALL="beida chengdu guangzhou nanjing shanghai shenyang wuhan xian"
 PAR=4
