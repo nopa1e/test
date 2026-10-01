@@ -98,7 +98,12 @@ def main() -> None:
                     "incident_window": [s, e],
                     "traffic_flow": {"edges": edges, "source": "netflow_rebuilt"},
                 }
-        dest = os.path.join(a.output_dir, f"{reg}_20260917040000_20260924040000")
+        # SPAN 从 prediction_id 里取（第三、四段），不能硬编码：
+        # 第一批是 20260819040000_20260902040000，第二批是 20260917040000_20260924040000
+        sample = (preds.get(reg) or [("", "", "")])[0][0]
+        parts = sample.split("_")
+        span = f"{parts[2]}_{parts[3]}" if len(parts) >= 4 else "unknown"
+        dest = os.path.join(a.output_dir, f"{reg}_{span}")
         os.makedirs(dest, exist_ok=True)
         out = os.path.join(dest, "flow_evidence.json")
         with open(out, "w", encoding="utf-8") as fh:
