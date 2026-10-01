@@ -725,6 +725,40 @@ _ROUTING_SUBS = {
 }
 
 
+#: firewall_cpu_pressure 的判定阈值（见下方注释的实测依据）
+_FW_CPU_PEAK_MIN = 10.0
+_FW_CPU_Z_MIN = 8.0
+
+
+def _firewall_pressure(fw_payload: dict | None) -> str | None:
+    """fw 节点自身出现资源压力时，返回 firewall 的子类。
+
+    赛题把 ``firewall_cpu_pressure`` 定义为「防火墙资源压力，导致转发性能下降」。
+    它模仿的对象恰恰是 service 类故障：防火墙打满 -> 转发变慢 -> 认证/Web 请求
+    超时 -> ``_flow_category`` 看到的就是 auth_timeout / web_slow。**唯一能把两者
+    分开的观测量，是防火墙网元自己的 CPU**。
+
+    实测依据（2026-10-01，8 区域 node_metrics 全量）：
+      fw cpu 中位 0.43~0.77，99 分位 1.8~5.1，而注入尖峰达 50~72；
+      尖峰孤立出现（每段 1~5 分钟），与「常态高负载」形态不同。
+      因此取 peak>=10 且 z>=8，只有真正的注入尖峰会命中。
+    """
+    if not fw_payload:
+        return None
+    cpu = ((fw_payload.get("metrics") or {}).get("cpu_usage")) or {}
+    peak, z = cpu.get("incident_peak"), cpu.get("peak_z")
+    if peak is None or z is None:
+        return None
+    try:
+        peak = float(peak)
+        z = float(z)
+    except (TypeError, ValueError):
+        return None
+    if peak >= _FW_CPU_PEAK_MIN and z >= _FW_CPU_Z_MIN:
+        return "cpu_pressure"
+    return None
+
+
 def _infer_category(
     routing_ev: dict,
     metric_ev: dict,
@@ -748,6 +782,19 @@ def _infer_category(
     """
     incident = ((routing_ev or {}).get("incidents") or {}).get(iid) or {}
     events = [e for e in (incident.get("events") or []) if e.get("node") == node]
+
+    metrics = (((metric_ev or {}).get("incidents") or {}).get(iid) or {}).get("nodes") or {}
+
+    # 0. firewall —— 必须排在 routing 之前。
+    #    防火墙资源压力会让 BGP/OSPF 邻居超时，routing_evidence 里同样会有事件，
+    #    但那是后果而非注入点；fw 自身 CPU 的注入尖峰（z >> 8）才是根因证据。
+    fw_sub = _firewall_pressure(metrics.get("fw"))
+    if fw_sub:
+        return {
+            "major_category": "firewall",
+            "sub_category": fw_sub,
+            "source": "metric_evidence:fw",
+        }
 
     # 1. routing —— 只承认真协议信号。``bgp_peer_uptime_seconds`` 的钟表信号不算，
     #    否则它恒真，会把后面所有分支都吃掉（这正是 F 只输出两个大类的原因）。
@@ -774,7 +821,6 @@ def _infer_category(
         if sub in _ROUTING_SUBS:
             return {"major_category": "routing", "sub_category": sub, "source": "routing_evidence"}
 
-    metrics = (((metric_ev or {}).get("incidents") or {}).get(iid) or {}).get("nodes") or {}
     payload = metrics.get(node) or {}
     ranked = payload.get("top_metrics") or []
     for entry in ranked[:3]:

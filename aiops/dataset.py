@@ -149,10 +149,19 @@ def canonical_node(node: Any) -> str:
             if m:
                 num = m.group(1)
                 return f"{prefix}-{num}" if num else prefix
-    if s.startswith("fw") or "firewall" in s:
+    # ``region-fw`` (e.g. beida-fw) must normalise to ``fw`` just like
+    # ``region-br-1`` normalises to ``br-1``.  Before this fix the regex below
+    # had no ``fw`` alternative, so ``beida-fw`` fell through and was returned
+    # verbatim -- ``build_metric_evidence`` then looked up node_groups["beida-fw"]
+    # (the table stores the bare name ``fw``), got None, and silently skipped the
+    # firewall.  Consequence measured on the 2026-10-01 run: the firewall
+    # evidence was missing everywhere, RootScore could never rank it, ``fw``
+    # never entered any top5, and the whole ``firewall`` major category (6 of
+    # the official 28 fault types) was never predicted.
+    if s.startswith("fw") or "firewall" in s or s.endswith("-fw") or "-fw-" in s:
         return "fw"
     # Embedded forms such as BR-2-ccf-aiops-shenyang / service-vm-1-...
-    m = re.search(r"(service-vm|traffic-vm|monitor-vm|br|cr)[-_]?(\d*)", s)
+    m = re.search(r"(service-vm|traffic-vm|monitor-vm|fw|br|cr)[-_]?(\d*)", s)
     if m:
         prefix, num = m.group(1), m.group(2)
         return f"{prefix}-{num}" if num else prefix
