@@ -641,6 +641,59 @@ def stage_predictive(args: argparse.Namespace) -> int:
 #: only when no routing evidence names the fault: metric evidence covers every
 #: incident (554/554 on xian), whereas routing evidence covers a minority, so
 #: this is what actually widens category coverage.
+#: resource 子类的最弱 z 门槛。低于它视为无可判资源异常，交回上层回退。
+_RESOURCE_Z_MIN = 3.0
+
+
+def _resource_subtype(payload: dict | None) -> tuple[str, float] | None:
+    """在该节点的**全部**指标里，选出异常最强的那个 resource 子族。
+
+    为什么要改（实测依据，2026-10-02）
+    ---------------------------------
+    原实现只扫描 ``top_metrics[:3]``，而 ``load1`` / ``disk_io_util`` /
+    ``cpu_usage`` / ``disk_write_rate`` 几乎永远霸占前三，于是
+    ``_METRIC_FAMILY`` 里排在后面的子族从不触发：
+
+        指标                        进前三次数   全量出现次数
+        cpu_usage                      23543        40324
+        disk_io_util                   29252        40482
+        load1                          29634        38624
+        --- 以下三个子族因此恒为 0 条预测 ---
+        memory_available_ratio             1         1763
+        process_count                      9         4391
+        filesystem_used_ratio              1           38
+
+    结果 resource 只输出 cpu_pressure / disk_io_pressure 两类，
+    官方 6 个子类里有 3 个从未出现。改为在全部指标上按 ``peak_z``
+    （标准化后的偏离强度，跨指标可比）挑最强子族。
+    """
+    if not payload:
+        return None
+    metrics = payload.get("metrics") or {}
+    best: tuple[str, float] | None = None
+    for sub, cols in _METRIC_FAMILY:
+        z = 0.0
+        for col in cols:
+            stat = metrics.get(col) or {}
+            try:
+                z = max(z, float(stat.get("peak_z") or 0.0))
+            except (TypeError, ValueError):
+                continue
+        if best is None or z > best[1]:
+            best = (sub, z)
+    if best and best[1] >= _RESOURCE_Z_MIN:
+        return best
+    # 向后兼容回退：全部子族都很弱时，沿用旧的「top_metrics 前三个里能对上就取」
+    # 行为。缺了这一步，原本能命中 resource 的样本会掉给 base 类别
+    # （实测会让 122 条 resource 变成 base 的 link/rate_limit，属回归）。
+    for entry in (payload.get("top_metrics") or [])[:3]:
+        name = str(entry.get("metric") or "")
+        for sub, columns in _METRIC_FAMILY:
+            if name in columns:
+                return (sub, 0.0)
+    return None
+
+
 _METRIC_FAMILY = (
     ("cpu_pressure", ("cpu_usage", "load1", "load5")),
     ("memory_pressure", ("memory_available_ratio", "swap_used_ratio")),
@@ -759,6 +812,94 @@ def _firewall_pressure(fw_payload: dict | None) -> str | None:
     return None
 
 
+def _firewall_mechanism(fw_payload, routing_events) -> dict | None:
+    """fw 节点上的非 CPU 机制子类（acl_drop / rate_limit / default_route_error）。
+
+    官方 firewall 共 6 子类，此前只实现了 cpu_pressure。这里按证据强度补齐：
+      acl_drop          <- fw 接口出现丢包/错误（ACL 规则丢弃流量）
+      rate_limit        <- fw 接口收发速率相对基线显著下降
+      default_route_error <- fw 上出现 ipv6_default_route_* 的变更事件
+      port_block / rule_order_error <- 现有 evidence 中无可判据（见文档）
+    """
+    if fw_payload:
+        itfs = fw_payload.get("interfaces") or {}
+        drop_z = 0.0
+        rate_drop = 0.0
+        for _iface, m in itfs.items():
+            if not isinstance(m, dict):
+                continue
+            for k in ("rx_drop_rate", "tx_drop_rate", "rx_error_rate", "tx_error_rate"):
+                stat = m.get(k) or {}
+                try:
+                    drop_z = max(drop_z, float(stat.get("peak_z") or 0.0))
+                except (TypeError, ValueError):
+                    continue
+            for k in ("rx_bytes_rate", "tx_bytes_rate", "rx_packets_rate", "tx_packets_rate"):
+                stat = m.get(k) or {}
+                try:
+                    rate_drop = max(rate_drop, float(stat.get("drop_ratio") or 0.0))
+                except (TypeError, ValueError):
+                    continue
+        if drop_z >= _LINK_DROP_Z_MIN:
+            return {"major_category": "firewall", "sub_category": "acl_drop",
+                    "source": "interface_evidence:dropz=%.1f" % drop_z}
+        # firewall/rate_limit 同 link/rate_limit，因 rate 判据无判别力而撤除。
+    for e in (routing_events or []):
+        mn = str(e.get("metric_name") or "")
+        if mn.startswith("ipv6_default_route"):
+            return {"major_category": "firewall", "sub_category": "default_route_error",
+                    "source": "routing_evidence:default_route"}
+    return None
+
+
+#: link 子类判据（接口层）。实测依据（2026-10-02，8 区域全量 metric_evidence）：
+#:   drops/errors 在 99.9% 分位都是 0，即绝大多数接口零丢包，一旦非零即为强信号；
+#:   而 rate 的 drop_ratio 中位 0、90 分位 0.76，过于常见，故 rate_limit 取更高门槛。
+_LINK_DROP_Z_MIN = 8.0
+_LINK_RATE_DROP_MIN = 0.95
+
+
+def _link_category(payload):
+    """从节点的接口度量判定 link 子类。
+
+    官方 link 三子类：delay / rate_limit / loss。
+      loss       <- rx_drop_rate/tx_drop_rate/rx_error_rate/tx_error_rate/carrier_changes
+      rate_limit <- 收发字节/包速率相对基线显著下降
+      delay      <- 数据里没有任何时延或抖动字段（已核对 interface_metrics 全部 9 列），
+                    故该子类不可判，不输出。
+    """
+    if not payload:
+        return None
+    itfs = payload.get("interfaces") or {}
+    if not itfs:
+        return None
+    drop_z = 0.0
+    rate_drop = 0.0
+    for _iface, m in itfs.items():
+        if not isinstance(m, dict):
+            continue
+        for k in ("rx_drop_rate", "tx_drop_rate", "rx_error_rate", "tx_error_rate",
+                  "carrier_changes"):
+            stat = m.get(k) or {}
+            try:
+                drop_z = max(drop_z, float(stat.get("peak_z") or 0.0))
+            except (TypeError, ValueError):
+                continue
+        for k in ("rx_bytes_rate", "tx_bytes_rate", "rx_packets_rate", "tx_packets_rate"):
+            stat = m.get(k) or {}
+            try:
+                rate_drop = max(rate_drop, float(stat.get("drop_ratio") or 0.0))
+            except (TypeError, ValueError):
+                continue
+    if drop_z >= _LINK_DROP_Z_MIN:
+        return {"major_category": "link", "sub_category": "loss",
+                "source": "interface_evidence:dropz=%.1f" % drop_z}
+    # rate_limit 分支已撤除：实测 rate 的 drop_ratio 中位 0、90 分位 0.76，
+    # 即 10% 的接口在正常波动下就会掉 76% 以上，无法与故障区分。
+    # 实测开启它会令 1204 条 resource 被改判成 link/rate_limit，是净损失。
+    return None
+
+
 def _infer_category(
     routing_ev: dict,
     metric_ev: dict,
@@ -788,13 +929,17 @@ def _infer_category(
     # 0. firewall —— 必须排在 routing 之前。
     #    防火墙资源压力会让 BGP/OSPF 邻居超时，routing_evidence 里同样会有事件，
     #    但那是后果而非注入点；fw 自身 CPU 的注入尖峰（z >> 8）才是根因证据。
-    fw_sub = _firewall_pressure(metrics.get("fw"))
+    fw_payload = metrics.get("fw")
+    fw_sub = _firewall_pressure(fw_payload)
     if fw_sub:
         return {
             "major_category": "firewall",
             "sub_category": fw_sub,
             "source": "metric_evidence:fw",
         }
+    fw_mech = _firewall_mechanism(fw_payload, events)
+    if fw_mech:
+        return fw_mech
 
     # 1. routing —— 只承认真协议信号。``bgp_peer_uptime_seconds`` 的钟表信号不算，
     #    否则它恒真，会把后面所有分支都吃掉（这正是 F 只输出两个大类的原因）。
@@ -821,17 +966,21 @@ def _infer_category(
         if sub in _ROUTING_SUBS:
             return {"major_category": "routing", "sub_category": sub, "source": "routing_evidence"}
 
+    # 3.5 link —— 接口层证据。置于钟表信号之后：钟表是零信息统计先验，
+    #     接口丢包是真实观测但覆盖极窄（全量仅 1 条 z>=8），故只接管
+    #     钟表接不住的样本，不去抢已有归属。
+    link_res = _link_category(metrics.get(node))
+    if link_res:
+        return link_res
+
     payload = metrics.get(node) or {}
-    ranked = payload.get("top_metrics") or []
-    for entry in ranked[:3]:
-        name = str(entry.get("metric") or "")
-        for sub, columns in _METRIC_FAMILY:
-            if name in columns:
-                return {
-                    "major_category": "resource",
-                    "sub_category": sub,
-                    "source": "metric_evidence",
-                }
+    picked = _resource_subtype(payload)
+    if picked:
+        return {
+            "major_category": "resource",
+            "sub_category": picked[0],
+            "source": f"metric_evidence:z={picked[1]:.1f}",
+        }
 
     return {**fallback, "source": "base"}
 
