@@ -33,7 +33,9 @@ TMPL = """区域: {region}
 候选网元: {nodes}
 
 输出格式（严格 JSON，无其他内容）:
-{{"root_cause": "<网元名>", "confidence": <0~1>, "reason": "<20字内>"}}"""
+{{"root_cause": "<网元名>", "confidence": <0~1>, "reason": "<20字内>"}}
+
+务必以一行 JSON 作为回答的最后一行。不要输出其他内容。"""
 
 
 def load_metric_ev(path: str) -> dict:
@@ -76,7 +78,7 @@ def ask(prompt: str, timeout: int = 120) -> str:
         "model": MODEL,
         "messages": [{"role": "system", "content": SYS}, {"role": "user", "content": prompt}],
         "temperature": 0.0,
-        "max_tokens": 300,
+        "max_tokens": 2048,
     }
     r = requests.post(API, json=body, timeout=timeout)
     r.raise_for_status()
@@ -84,13 +86,31 @@ def ask(prompt: str, timeout: int = 120) -> str:
 
 
 def parse_json(text: str) -> dict | None:
-    m = re.search(r"\{[^{}]*\}", text, re.S)
-    if not m:
+    """从推理模型的输出里抠出根因 JSON。
+
+    R1 系模型会先写一大段思维链，JSON 通常在末尾；且 reason 字段里可能带
+    花括号内容，所以先尝试非贪婪的整段匹配，再从后往前逐个候选试解析。
+    """
+    if not text:
         return None
-    try:
-        return json.loads(m.group(0))
-    except Exception:
-        return None
+    cands = re.findall(r"\{[^{}]*\}", text, re.S)
+    for c in reversed(cands):
+        try:
+            obj = json.loads(c)
+        except Exception:
+            continue
+        if isinstance(obj, dict) and obj.get("root_cause"):
+            return obj
+    # 退一步：允许一层嵌套
+    m = re.search(r"\{.*\}", text, re.S)
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+            if isinstance(obj, dict) and obj.get("root_cause"):
+                return obj
+        except Exception:
+            pass
+    return None
 
 
 def main() -> None:
@@ -100,6 +120,9 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--save", default=None)
+    ap.add_argument("--iids-file", default=None,
+                    help="只处理该文件列出的 incident_id（每行一个）。"
+                         "提交里只含去重后的一部分 incident，不过滤会浪费约半数算力。")
     a = ap.parse_args()
 
     d = os.path.join(a.out_dir, [x for x in os.listdir(a.out_dir) if x.startswith(a.region + "_")][0])
@@ -115,7 +138,13 @@ def main() -> None:
         adj.setdefault(t, []).append(s)
 
     incs = cands.get("incidents") or {}
-    ids = list(incs)[: a.limit]
+    ids = list(incs)
+    if a.iids_file:
+        want = {l.strip() for l in open(a.iids_file, encoding="utf-8") if l.strip()}
+        before = len(ids)
+        ids = [i for i in ids if i in want]
+        print(f"  iid 过滤: {before} -> {len(ids)}")
+    ids = ids[: a.limit]
     print(f"区域 {a.region}: 取 {len(ids)} 个 incident 送 LLM")
 
     mi = (metric.get("incidents") or {})
@@ -125,10 +154,20 @@ def main() -> None:
         p = incs[iid]
         nodes = list(p.get("top10") or p.get("top5") or [])
         tr = p.get("time_range") or {}
+        start = tr.get("start") or p.get("first_anomaly_time")
+        end = tr.get("end")
+        if not start or not end:
+            # candidates.json 的时间窗常常为空；metric_evidence 里每个节点都带
+            # incident_window，取任一节点即可（同一 incident 共用同一窗口）。
+            for _n, _np in (payload.get("nodes") or {}).items():
+                iw = _np.get("incident_window") or []
+                if len(iw) >= 2:
+                    start, end = iw[0], iw[1]
+                    break
         prompt = TMPL.format(
             region=a.region,
-            start=tr.get("start") or (p.get("first_anomaly_time") or "?"),
-            end=tr.get("end") or "?",
+            start=start or "?",
+            end=end or "?",
             evidence=build_evidence_text(payload),
             topo=topo_text(adj, nodes),
             nodes=", ".join(nodes),
@@ -140,7 +179,7 @@ def main() -> None:
         except Exception as exc:
             got = {"error": f"{type(exc).__name__}: {exc}"}
         return {"iid": iid, "llm": got, "rootscore_top1": (p.get("top5") or [None])[0],
-                "rootscore_top5": p.get("top5") or [], "elapsed": time.time() - t0, "raw": txt[:200] if 'txt' in dir() else None}
+                "rootscore_top5": p.get("top5") or [], "elapsed": time.time() - t0, "raw": (txt[:600] if isinstance(txt, str) else None)}
 
     with ThreadPoolExecutor(max_workers=a.workers) as ex:
         results = list(ex.map(work, ids))
