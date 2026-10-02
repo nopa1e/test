@@ -62,6 +62,7 @@ STEP2_TABLES = (
 F_BIN_MINUTES = 1
 F_EPISODE_MAX_GAP_MINUTES = 1
 F_EPISODE_MIN_DURATION_MINUTES = 1
+F_EPISODE_MIN_ABNORMAL_POINTS = 2
 
 
 def _now() -> str:
@@ -79,6 +80,7 @@ def build_cfg(args: argparse.Namespace) -> PipelineConfig:
         bin_minutes=args.bin_minutes,
         episode_max_gap_minutes=args.episode_max_gap_minutes,
         episode_min_duration_minutes=args.episode_min_duration_minutes,
+        episode_min_abnormal_points=args.episode_min_abnormal_points,
         vae_epochs=args.vae_epochs,
         # F6 must be comparable to C's already-measured base, which had no GNN.
         use_gnn=False,
@@ -315,6 +317,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--bin-minutes", type=int, default=F_BIN_MINUTES)
     p.add_argument("--episode-max-gap-minutes", type=int, default=F_EPISODE_MAX_GAP_MINUTES)
     p.add_argument("--episode-min-duration-minutes", type=int, default=F_EPISODE_MIN_DURATION_MINUTES)
+    p.add_argument("--episode-min-abnormal-points", type=int, default=F_EPISODE_MIN_ABNORMAL_POINTS,
+                   help="一个 episode 至少需要多少个高于阈值的点。默认 2 会丢弃孤立单点；"
+                        "实测（2026-10-02, beida）阈值 0.8209 之上的 2667 个连续段里，"
+                        "1982 个（74.3%）长度为 1 而被丢弃，其中 1141 个分数 >=0.95。")
     p.add_argument("--vae-epochs", type=int, default=40)
     p.add_argument("--max-netflow-rows", type=int, default=250_000)
     p.add_argument("--netflow-topology-max-rows", type=int, default=0)
