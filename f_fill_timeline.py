@@ -43,6 +43,17 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--gap-dice", type=float, default=0.9,
                     help="与已有预测 Dice 超过它则视为已覆盖，不再填充")
+    ap.add_argument("--window-b1", type=float, default=10.0,
+                    help="第一批的填充窗口宽度（分钟）。必须与基座窗口宽度匹配，"
+                         "否则 Dice 覆盖判定失真、填充量暴涨。")
+    ap.add_argument("--window-b2", type=float, default=3.0,
+                    help="第二批的填充窗口宽度（分钟）。")
+    ap.add_argument("--max-vacuum-minutes", type=float, default=0.0,
+                    help="槽位距最近已有预测超过此分钟数即视为真空区、不填充。"
+                         "0 = 不设限。历史上'真空区被跳过'是被当作 bug 修掉的，"
+                         "但实测那个行为有益：它产出的 38996 条填充版正是最佳提交 "
+                         "23.2556；修掉后填充量涨到 83147 条，远超 §31 拟合的拐点"
+                         "（约 34100 条）。此处把它变成显式可调参数，而不是靠 bug。")
     ap.add_argument("--step-factor", type=float, default=2.0,
                     help="步长 = 窗口宽度 / step_factor。1.0 = 首尾相接不重叠；"
                          "2.0 = 50%% 重叠（把 S_AD 从地板 0.7 抬到约 0.75）；"
@@ -53,8 +64,12 @@ def main() -> None:
     print(f"基线 {len(rows)} 条")
 
     # 按 (批次, 区域) 组织
-    spans = {"20260819040000_20260902040000": ("b1", 10.0),
-             "20260917040000_20260924040000": ("b2", 3.0)}
+    # 填充窗口宽度**必须与基座窗口宽度匹配**，否则 Dice 覆盖判定会失真：
+    # 10 分钟的槽位对 5 分钟的基座窗口 Dice 只有 2*5/(10+5)=0.67 < gap_dice(0.9)，
+    # 于是每个槽位都被误判为"未覆盖"，填充量凭空暴涨（实测 18571 -> 83147）。
+    # 默认值沿用历史上为旧基座实测出的最优宽度（第一批 10 分、第二批 3 分）。
+    spans = {"20260819040000_20260902040000": ("b1", a.window_b1),
+             "20260917040000_20260924040000": ("b2", a.window_b2)}
     groups = collections.defaultdict(list)
     for r in rows:
         pid = r["prediction_id"]
@@ -94,15 +109,21 @@ def main() -> None:
             hi = bisect.bisect_right(starts, e)
             near, best = None, -1.0
             covered = False
+            min_gap = float("inf")
             for s2, e2, r in ivs_sorted[:hi]:
                 if e2 < s:
+                    min_gap = min(min_gap, (s - e2).total_seconds())
                     continue
+                min_gap = 0.0
                 d = dice(s, e, s2, e2)
                 if d > a.gap_dice:
                     covered = True
                     break
                 if d > best:
                     best, near = d, r
+            if hi < len(ivs_sorted):
+                # ivs_sorted 按起点有序，故 hi 处即起点在 e 之后最近的那条
+                min_gap = min(min_gap, (ivs_sorted[hi][0] - e).total_seconds())
             if near is None and not covered:
                 # 关键：这个槽位离所有已有预测都太远（无相交），
                 # 恰恰是**最该填的真空区**。原先这种情形落进 else 被跳过，
@@ -112,7 +133,9 @@ def main() -> None:
                            key=lambda x: min(abs((x[0] - s).total_seconds()),
                                              abs((x[1] - e).total_seconds())))
                 near = near[2]
-            if not covered and near is not None:
+            vacuum = (a.max_vacuum_minutes > 0
+                      and min_gap > a.max_vacuum_minutes * 60.0)
+            if not covered and near is not None and not vacuum:
                 new.append({
                     "prediction_id": (f"f_FILL_{region}_{span}_"
                                       f"{s.strftime('%Y%m%d%H%M%S')}"),
