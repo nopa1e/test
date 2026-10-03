@@ -66,18 +66,48 @@ def describe(name: str, rows: list[dict]) -> None:
     print("  major_category:", dict(majors.most_common()))
 
 
+def secs(row: dict) -> tuple[float, float]:
+    return parse(row["start_time"]).timestamp(), parse(row["end_time"]).timestamp()
+
+
+def dice_secs(a: tuple[float, float], b: tuple[float, float]) -> float:
+    inter = min(a[1], b[1]) - max(a[0], b[0])
+    if inter <= 0:
+        return 0.0
+    denom = (a[1] - a[0]) + (b[1] - b[0])
+    return 2.0 * inter / denom if denom > 0 else 0.0
+
+
 def coverage(old_rows: list[dict], new_rows: list[dict], label: str) -> None:
-    """How much of the old prediction set survives in the new one."""
-    by_batch = collections.defaultdict(list)
-    for r in new_rows:
-        by_batch[batch_of(r)].append(r)
+    """How much of the old prediction set survives in the new one.
+
+    O(old x new) would be ~2e8 Dice calls here, so new rows are bucketed by
+    every whole hour their window spans and each old row only looks in the
+    buckets it touches.
+    """
+    HOUR = 3600.0
+    new_secs = [secs(r) for r in new_rows]
+    buckets: dict[tuple[str, int], list[int]] = collections.defaultdict(list)
+    for idx, r in enumerate(new_rows):
+        s, e = new_secs[idx]
+        b = batch_of(r)
+        for h in range(int(s // HOUR), int(e // HOUR) + 1):
+            buckets[(b, h)].append(idx)
+
     hit = miss = 0
+    compared = 0
     miss_examples = []
     for r in old_rows:
-        cands = by_batch.get(batch_of(r), [])
+        s, e = secs(r)
+        b = batch_of(r)
+        cand = set()
+        for h in range(int(s // HOUR), int(e // HOUR) + 1):
+            cand.update(buckets.get((b, h), ()))
         best = 0.0
-        for c in cands:
-            d = dice(r, c)
+        ours = (s, e)
+        for idx in cand:
+            compared += 1
+            d = dice_secs(ours, new_secs[idx])
             if d > best:
                 best = d
                 if best >= 0.4:
@@ -86,11 +116,12 @@ def coverage(old_rows: list[dict], new_rows: list[dict], label: str) -> None:
             hit += 1
         else:
             miss += 1
-            if len(miss_examples) < 5:
+            if len(miss_examples) < 8:
                 miss_examples.append((r["prediction_id"], round(best, 3)))
     total = hit + miss
     print(f"\n=== 旧集在新集中的存活率（{label}）===")
-    print(f"  Dice>=0.4 命中 {hit}/{total} = {hit / max(1, total) * 100:.1f}%   丢失 {miss}")
+    print(f"  Dice>=0.4 命中 {hit}/{total} = {hit / max(1, total) * 100:.1f}%   丢失 {miss}"
+          f"   （实际比较 {compared:,} 次）")
     if miss_examples:
         print("  丢失样例 (id, 最佳 Dice):")
         for pid, d in miss_examples:
