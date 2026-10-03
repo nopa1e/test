@@ -101,21 +101,11 @@ def build_episode_signatures(episode_df: pd.DataFrame, point_df: pd.DataFrame) -
     points = point_df.copy()
     if "timestamp_bin" in points.columns:
         points["_ts"] = pd.to_datetime(points["timestamp_bin"], errors="coerce", utc=True)
-    # The naive version re-stringified the whole node column once per episode,
-    # costing O(n_episodes * n_points) conversions.  Bucket the frame by node up
-    # front instead.  ``sort=False`` keeps the original row order inside every
-    # bucket, so each episode still sees a bit-identical sub-frame.
-    by_node: dict[str, pd.DataFrame] = {}
-    if "network_element_id" in points.columns:
-        neid = points["network_element_id"].astype(str)
-        for node_key, grp in points.groupby(neid, observed=True, sort=False):
-            by_node[str(node_key)] = grp
-    empty_points = points.iloc[0:0]
     for _, ep in df.iterrows():
         node = str(ep.get("network_element_id", ""))
         start = _as_ts(ep.get("start_time"))
         end = _as_ts(ep.get("end_time"))
-        sub = by_node.get(node, empty_points)
+        sub = points[points["network_element_id"].astype(str) == node] if "network_element_id" in points.columns else points.iloc[0:0]
         if "_ts" in sub.columns and start is not None and end is not None:
             sub = sub[(sub["_ts"] >= start) & (sub["_ts"] <= end)]
         names = _feature_set_from_points(sub)
@@ -216,107 +206,14 @@ def build_incidents(
     uf = _UnionFind(n)
     affinity_edges: list[dict[str, Any]] = []
     records = episodes.to_dict(orient="records")
-
-    # ---- hoist everything incident_affinity() rebuilt for every pair --------
-    # The naive loop called incident_affinity() O(n^2) times and each call
-    # re-parsed four timestamps plus re-ran a graph shortest path.  Both are
-    # pair-independent, so they are computed once here.  The arithmetic below
-    # is a literal transcription of incident_affinity()'s body.
-    thr = float(cfg.incident_similarity_threshold)
-    merge_thr = float(cfg.incident_merge_threshold)
-    max_gap = float(cfg.incident_max_time_gap_minutes)
-    w_temporal = float(cfg.incident_temporal_weight)
-    w_node = float(cfg.incident_node_overlap_weight)
-    w_topo = float(cfg.incident_topology_weight)
-    w_metric = float(cfg.incident_metric_weight)
-    w_event = float(cfg.incident_event_weight)
-    max_distance = int(cfg.incident_topology_distance)
-
-    starts = [_as_ts(r.get("start_time")) for r in records]
-    ends = [_as_ts(r.get("end_time")) for r in records]
-    node_of = [str(r.get("network_element_id", "")) for r in records]
-    sig_of = [set(r.get("metric_signature") or []) for r in records]
-    evt_of = [set(r.get("event_signature") or []) for r in records]
-    time_ok = [s is not None and e is not None for s, e in zip(starts, ends)]
-    episode_ids = [r["episode_id"] for r in records]
-
-    # There are at most |nodes|^2 distinct node pairs, so this cache stays tiny.
-    topo_cache: dict[tuple[str, str], float] = {}
-
-    def _topo_sim(node_a: str, node_b: str) -> float:
-        cached = topo_cache.get((node_a, node_b))
-        if cached is None:
-            cached = _topology_similarity(entity_graph, {node_a}, {node_b}, max_distance)
-            topo_cache[(node_a, node_b)] = cached
-        return cached
-
     for i in range(n):
-        a_valid = time_ok[i]
-        if a_valid:
-            a_start, a_end = starts[i], ends[i]
-            a_node = node_of[i]
-            sig_a, evt_a = sig_of[i], evt_of[i]
-        ep_a = episode_ids[i]
         for j in range(i + 1, n):
-            if not a_valid or not time_ok[j]:
-                # incident_affinity() reports invalid_time; that only survives
-                # the threshold test under a degenerate (<= 0) configuration.
-                if thr > 0.0:
-                    continue
-                affinity_edges.append({
-                    "episode_a": ep_a,
-                    "episode_b": episode_ids[j],
-                    "incident_affinity_score": 0.0,
-                    "reason": "invalid_time",
-                })
-                if 0.0 >= merge_thr:
-                    uf.union(i, j)
+            aff = incident_affinity(records[i], records[j], entity_graph, point_df, cfg)
+            if aff["incident_affinity_score"] < float(cfg.incident_similarity_threshold):
                 continue
-            b_start, b_end = starts[j], ends[j]
-            if b_start > a_end:
-                gap_minutes = (b_start - a_end).total_seconds() / 60.0
-            elif a_start > b_end:
-                gap_minutes = (a_start - b_end).total_seconds() / 60.0
-            else:
-                gap_minutes = 0.0
-            if gap_minutes > max_gap:
-                temporal = 0.0
-            else:
-                overlap = _temporal_overlap(a_start, a_end, b_start, b_end)
-                gap_score = 1.0 - max(0.0, gap_minutes) / max(1.0, max_gap)
-                temporal = overlap if overlap > gap_score else gap_score
-            b_node = node_of[j]
-            node_overlap = 1.0 if a_node == b_node else 0.0
-            topo = _topo_sim(a_node, b_node)
-            sig_b = sig_of[j]
-            inter = len(sig_a & sig_b)
-            union = len(sig_a) + len(sig_b) - inter
-            metric_sim = float(inter / union) if union else 0.0
-            evt_b = evt_of[j]
-            inter = len(evt_a & evt_b)
-            union = len(evt_a) + len(evt_b) - inter
-            event_sim = float(inter / union) if union else 0.0
-            score = float(max(0.0, min(1.0, (
-                w_temporal * temporal
-                + w_node * node_overlap
-                + w_topo * topo
-                + w_metric * metric_sim
-                + w_event * event_sim
-            ))))
-            if score < thr:
-                continue
-            affinity_edges.append({
-                "episode_a": ep_a,
-                "episode_b": episode_ids[j],
-                "incident_affinity_score": score,
-                "temporal_similarity": float(temporal),
-                "node_overlap": float(node_overlap),
-                "topology_similarity": float(topo),
-                "metric_signature_similarity": float(metric_sim),
-                "event_signature_similarity": float(event_sim),
-                "time_gap_minutes": float(gap_minutes),
-            })
-            if score >= merge_thr:
+            edge = {"episode_a": records[i]["episode_id"], "episode_b": records[j]["episode_id"], **aff}
+            affinity_edges.append(edge)
+            if aff["incident_affinity_score"] >= float(cfg.incident_merge_threshold):
                 uf.union(i, j)
 
     groups: dict[int, list[int]] = defaultdict(list)
