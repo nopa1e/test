@@ -70,13 +70,33 @@ def main() -> None:
     # 默认值沿用历史上为旧基座实测出的最优宽度（第一批 10 分、第二批 3 分）。
     spans = {"20260819040000_20260902040000": ("b1", a.window_b1),
              "20260917040000_20260924040000": ("b2", a.window_b2)}
+    # 归属必须按**窗口时间**判定，不能按 prediction_id 里的子串：
+    # 重锚变体的 id 形如 f_REAN_beida_beida_000000，里面根本没有批次时间戳，
+    # 旧写法会把它们整批跳过 —— 于是它们不提供任何覆盖，所有相邻槽位都被
+    # 判为未覆盖而重复填充（实测 18571 基座 -> 83147 条填充，其中 53760 条
+    # 来自第二批）。区域名改从根因节点前缀取，两种 id 格式都适用。
+    # 注意 span 是**区间**不是单日：第一批 20260819~20260902（14 天）、
+    # 第二批 20260917~20260924（7 天）。必须按时间范围归属，
+    # 按"起始日相等"判定会漏掉 90% 的条目。
+    span_ranges = {}
+    for sp in spans:
+        lo_s, hi_s = sp.split("_")
+        span_ranges[sp] = (
+            pd.Timestamp(f"{lo_s[:4]}-{lo_s[4:6]}-{lo_s[6:8]}"),
+            pd.Timestamp(f"{hi_s[:4]}-{hi_s[4:6]}-{hi_s[6:8]}") + pd.Timedelta(days=1))
     groups = collections.defaultdict(list)
+    skipped = 0
     for r in rows:
-        pid = r["prediction_id"]
-        span = next((s for s in spans if s in pid), None)
+        s_ts = pd.Timestamp(r["start_time"]).tz_localize(None)
+        span = next((sp for sp, (lo, hi) in span_ranges.items() if lo <= s_ts < hi), None)
         if span is None:
+            skipped += 1
             continue
-        groups[(span, pid.split("_")[2])].append(r)
+        rc = r.get("root_cause_top5") or []
+        region = str(rc[0]["network_element_id"]).split("-")[0] if rc else "unknown"
+        groups[(span, region)].append(r)
+    if skipped:
+        print(f"  警告: {skipped} 条无法按窗口日期归入批次，已跳过")
 
     def dice(s1, e1, s2, e2):
         """标准 Dice = 2|A∩B|/(|A|+|B|)。见 f_inject_anomalies.py 的修正记录。"""
