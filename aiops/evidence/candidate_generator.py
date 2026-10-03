@@ -426,10 +426,19 @@ def build_candidates(
         timed = sorted(
             ((node, ts) for node, ts in times.items() if ts is not None), key=lambda kv: kv[1]
         )
+        # 传入 first_anomaly_time 作为并列键：真正同一时刻的候选共享同一优先级。
+        # 旧写法把「九台设备同时最早」这种零信息情形摊成 0.0~1.0 的满量程，
+        # 主观上等于给权重最高的这一项（0.25）注入任意噪声。
         if order:
-            priority = rank_priority(order)
+            order_keys = [times.get(node) for node in order]
+            priority = rank_priority(
+                order,
+                order_keys if all(k is not None for k in order_keys) else None,
+            )
         else:
-            priority = rank_priority([node for node, _ in timed])
+            priority = rank_priority(
+                [node for node, _ in timed], [ts for _, ts in timed]
+            )
 
         neighbours = {node: {canonical_node(n) for n in adjacency.get(node, ())} for node in store} if adjacency else {}
 

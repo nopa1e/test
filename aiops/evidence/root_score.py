@@ -61,19 +61,50 @@ def clamp01(value: float) -> float:
     return 0.0 if value < 0.0 else (1.0 if value > 1.0 else float(value))
 
 
-def rank_priority(order: Sequence[str]) -> dict[str, float]:
+def rank_priority(
+    order: Sequence[str], keys: Sequence[object] | None = None
+) -> dict[str, float]:
     """Turn a first-mover order into a [0, 1] priority.
 
     The earliest mover gets 1.0 and the last gets 0.0; a single candidate gets
     1.0 (it is trivially first).  Linear rather than exponential so one noisy
     stamp cannot dominate the 0.25-weight term.
+
+    ``keys`` carries the value each entry was ordered by (the first-anomaly
+    timestamp).  **Entries sharing a key are genuinely tied and now receive the
+    same priority.**  Without this, the previous implementation spread a total
+    tie across the whole [0, 1] range in whatever order the caller happened to
+    produce -- injecting maximum-amplitude noise into the highest-weight term
+    (0.25) precisely when the evidence said "no information".
+
+    Measured on the 2026-10-03 build (beida/xian): the earliest
+    ``first_anomaly_time`` is shared by **all nine** candidates in 75.9% / 64.5%
+    of incidents, and zeroing this term changes top1 in 42.1% / 46.4% of them.
+    See DSH连接工作文档.md 第 41 节.
+
+    When every entry ties, the family carries no information at all, so it maps
+    to all-zeros -- consistent with :func:`minmax`, which documents exactly this
+    rule for the other six families.  ``keys=None`` reproduces the historical
+    behaviour bit-for-bit, so callers that cannot supply keys are unaffected.
     """
     n = len(order)
     if n == 0:
         return {}
     if n == 1:
         return {order[0]: 1.0}
-    return {node: 1.0 - (idx / (n - 1)) for idx, node in enumerate(order)}
+    if keys is None:
+        return {node: 1.0 - (idx / (n - 1)) for idx, node in enumerate(order)}
+    if len(keys) != n:
+        raise ValueError("rank_priority: keys must align with order")
+    first_seen: dict[object, int] = {}
+    for key in keys:
+        if key not in first_seen:
+            first_seen[key] = len(first_seen)
+    last = len(first_seen) - 1
+    if last <= 0:
+        # 全部并列：这一维没有任何区分度。
+        return {node: 0.0 for node in order}
+    return {node: 1.0 - first_seen[k] / last for node, k in zip(order, keys)}
 
 
 def combine(sub_scores: Mapping[str, float]) -> float:
