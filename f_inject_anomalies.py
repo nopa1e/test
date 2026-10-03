@@ -107,10 +107,18 @@ def main() -> None:
                               pd.Timestamp(r["end_time"]).tz_localize(None)))
 
     def dice(s1, e1, s2, e2) -> float:
+        """标准 Dice 系数 = 2|A∩B| / (|A|+|B|)。
+
+        修正记录（2026-10-03）：原实现分母误写成并集
+        ``|A|+|B|-|A∩B|``（那是 Jaccard 型），会算出 >1 的值
+        （完全相同的时间窗得 2.0 而非 1.0）。后果是阈值被隐性放大：
+        ``buggy>0.95`` 实际只相当于真 Dice>0.62，**把大量本该注入的预测
+        当成了重复丢掉**。
+        """
         lo, hi = max(s1, s2), min(e1, e2)
         inter = max(0.0, (hi - lo).total_seconds())
-        u = (e1 - s1).total_seconds() + (e2 - s2).total_seconds() - inter
-        return 2 * inter / u if u > 0 else 0.0
+        tot = (e1 - s1).total_seconds() + (e2 - s2).total_seconds()
+        return 2 * inter / tot if tot > 0 else 0.0
 
     new_preds = []
     stat = collections.Counter()

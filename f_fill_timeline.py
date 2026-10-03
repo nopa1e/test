@@ -64,10 +64,11 @@ def main() -> None:
         groups[(span, pid.split("_")[2])].append(r)
 
     def dice(s1, e1, s2, e2):
+        """标准 Dice = 2|A∩B|/(|A|+|B|)。见 f_inject_anomalies.py 的修正记录。"""
         lo, hi = max(s1, s2), min(e1, e2)
         inter = max(0.0, (hi - lo).total_seconds())
-        u = (e1 - s1).total_seconds() + (e2 - s2).total_seconds() - inter
-        return 2 * inter / u if u > 0 else 0.0
+        tot = (e1 - s1).total_seconds() + (e2 - s2).total_seconds()
+        return 2 * inter / tot if tot > 0 else 0.0
 
     new = []
     stat = collections.Counter()
