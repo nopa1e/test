@@ -86,6 +86,12 @@ def main() -> None:
     ])
     ap.add_argument("--candidates", nargs="+", required=True)
     ap.add_argument("--quantile", type=float, default=0.9)
+    ap.add_argument("--truth-minutes", type=float, default=10.4,
+                    help="真值故障窗的最小时长（分钟）。依据 §12.6：官方 sample 的"
+                         "真值故障时长是 8.6 / 9.3 / 13.3 分钟，平均 10.4 分钟。"
+                         "代理段是从高分栅格点合并出来的，单栅格故障只给出 5 分钟，"
+                         "会**系统性低估真值时长**，进而让 S_AD 的 |Δ止| 项失真——"
+                         "上一轮「窄窗更优」的错误结论就是栽在这里。")
     ap.add_argument("--score-threshold", type=float, default=None,
                     help="改用绝对分数阈值（默认用分位阈值）")
     a = ap.parse_args()
@@ -125,13 +131,17 @@ def main() -> None:
             thr = a.score_threshold if a.score_threshold is not None else float(score.quantile(a.quantile))
             times = sorted({t.timestamp() for t in ts[score >= thr].dropna()})
             segs = segments(times, gap=BIN_MINUTES * 60)
+            # 真值窗最小时长：单栅格故障段只有 5 分钟，会系统性低估真实故障时长，
+            # 使 S_AD 的 |Δ止| 项失真。按 §12.6 的经验值抬高到 truth_minutes。
+            truth_len = a.truth_minutes * 60.0
+            segs_truth = [(s, max(e, s + truth_len)) for (s, e) in segs]
 
             for c in a.candidates:
                 wins = cand_by_span[span][c]
                 bk = bucketize(wins)
                 tp = 0
                 sad = 0.0
-                for (s, e) in segs:
+                for (s, e) in segs_truth:
                     m = best_match(s, e, wins, bk)
                     if m and m[0] >= DICE_GATE:
                         tp += 1
