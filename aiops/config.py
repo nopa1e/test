@@ -111,6 +111,9 @@ class PipelineConfig:
     incident_topology_weight: float = 0.20
     incident_metric_weight: float = 0.10
     incident_event_weight: float = 0.10
+    # Diagnostic-only cap on the affinity_edges payload written to
+    # incident_clusters.json.  0 = unlimited (the equivalence reference).
+    incident_max_affinity_edges: int = 0
 
     # Propagation
     propagation_max_lag_minutes: int = 30

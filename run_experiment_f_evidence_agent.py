@@ -81,6 +81,7 @@ def build_cfg(args: argparse.Namespace) -> PipelineConfig:
         episode_max_gap_minutes=args.episode_max_gap_minutes,
         episode_min_duration_minutes=args.episode_min_duration_minutes,
         episode_min_abnormal_points=args.episode_min_abnormal_points,
+        incident_max_affinity_edges=args.incident_max_affinity_edges,
         vae_epochs=args.vae_epochs,
         # F6 must be comparable to C's already-measured base, which had no GNN.
         use_gnn=False,
@@ -116,8 +117,9 @@ def stage_f6_base(args: argparse.Namespace) -> int:
     print(f"[F6]   output_dir     : {cfg.output_dir}", flush=True)
     print(f"[F6]   dataset_filter : {_region_filter(args.regions)!r}", flush=True)
     print(f"[F6]   bin_minutes    : {cfg.bin_minutes}", flush=True)
-    print(f"[F6]   episode gap/min: {cfg.episode_max_gap_minutes} / {cfg.episode_min_duration_minutes}",
-          flush=True)
+    print(f"[F6]   episode gap/min: {cfg.episode_max_gap_minutes} / {cfg.episode_min_duration_minutes}"
+          f"   min_abnormal_points: {cfg.episode_min_abnormal_points}", flush=True)
+    print(f"[F6]   affinity edge cap: {cfg.incident_max_affinity_edges} (0=unlimited)", flush=True)
     print(f"[F6]   use_gnn        : {cfg.use_gnn}   experiment_mode: {cfg.experiment_mode}", flush=True)
 
     t0 = time.time()
@@ -320,7 +322,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--episode-min-abnormal-points", type=int, default=F_EPISODE_MIN_ABNORMAL_POINTS,
                    help="一个 episode 至少需要多少个高于阈值的点。默认 2 会丢弃孤立单点；"
                         "实测（2026-10-02, beida）阈值 0.8209 之上的 2667 个连续段里，"
-                        "1982 个（74.3%）长度为 1 而被丢弃，其中 1141 个分数 >=0.95。")
+                        "1982 个（74.3%%）长度为 1 而被丢弃，其中 1141 个分数 >=0.95。")
+    p.add_argument("--incident-max-affinity-edges", type=int, default=0,
+                   help="affinity_edges 诊断载荷上限（0=不限）。1 分钟分箱时单区域可产出"
+                        "数百万条边（数 GB JSON），而下游没有任何消费者读取它。")
     p.add_argument("--vae-epochs", type=int, default=40)
     p.add_argument("--max-netflow-rows", type=int, default=250_000)
     p.add_argument("--netflow-topology-max-rows", type=int, default=0)

@@ -231,6 +231,17 @@ def build_incidents(
     w_metric = float(cfg.incident_metric_weight)
     w_event = float(cfg.incident_event_weight)
     max_distance = int(cfg.incident_topology_distance)
+    # Diagnostic-only payload: at 1-minute binning a region can produce millions
+    # of affinity edges (~2 GB of JSON) that nothing downstream reads.  0 keeps
+    # every edge, which is what the equivalence reference does.
+    max_edges = int(getattr(cfg, "incident_max_affinity_edges", 0) or 0)
+    edges_total = 0
+
+    def _record_edge(edge: dict[str, Any]) -> None:
+        nonlocal edges_total
+        edges_total += 1
+        if max_edges <= 0 or len(affinity_edges) < max_edges:
+            affinity_edges.append(edge)
 
     starts = [_as_ts(r.get("start_time")) for r in records]
     ends = [_as_ts(r.get("end_time")) for r in records]
@@ -263,7 +274,7 @@ def build_incidents(
                 # the threshold test under a degenerate (<= 0) configuration.
                 if thr > 0.0:
                     continue
-                affinity_edges.append({
+                _record_edge({
                     "episode_a": ep_a,
                     "episode_b": episode_ids[j],
                     "incident_affinity_score": 0.0,
@@ -305,7 +316,7 @@ def build_incidents(
             ))))
             if score < thr:
                 continue
-            affinity_edges.append({
+            _record_edge({
                 "episode_a": ep_a,
                 "episode_b": episode_ids[j],
                 "incident_affinity_score": score,
@@ -325,23 +336,40 @@ def build_incidents(
 
     incidents: list[dict[str, Any]] = []
     clusters: list[dict[str, Any]] = []
-    ordered_groups = sorted(groups.values(), key=lambda idxs: min(_as_ts(records[i]["start_time"]) or pd.Timestamp.min.tz_localize("UTC") for i in idxs))
+    ordered_groups = sorted(groups.values(), key=lambda idxs: min(starts[i] or pd.Timestamp.min.tz_localize("UTC") for i in idxs))
     points = point_df.copy()
     if "timestamp_bin" in points.columns:
         points["_ts"] = pd.to_datetime(points["timestamp_bin"], errors="coerce", utc=True)
+    # Every incident used to rescan the whole point table for its time slice,
+    # i.e. O(n_incidents * n_points) comparisons.  Sort once and bisect instead.
+    # Sorting is safe because the timeline is order-independent: groupby sorts by
+    # its key, the node list is re-sorted, and the original row order is restored
+    # before the mean is taken, so results stay bit-identical.
+    ts_ns = None
+    if "_ts" in points.columns:
+        points = points.reset_index(drop=True)
+        ts_ns = points["_ts"].astype("int64").to_numpy()
+        order = np.argsort(ts_ns, kind="stable")
+        points = points.iloc[order]
+        ts_ns = ts_ns[order]
     for inc_idx, idxs in enumerate(ordered_groups, start=1):
         eps = [records[i] for i in idxs]
-        starts = [_as_ts(e["start_time"]) for e in eps]
-        ends = [_as_ts(e["end_time"]) for e in eps]
-        starts = [t for t in starts if t is not None]
-        ends = [t for t in ends if t is not None]
-        if not starts or not ends:
+        starts_g = [_as_ts(e["start_time"]) for e in eps]
+        ends_g = [_as_ts(e["end_time"]) for e in eps]
+        starts_g = [t for t in starts_g if t is not None]
+        ends_g = [t for t in ends_g if t is not None]
+        if not starts_g or not ends_g:
             continue
-        start, end = min(starts), max(ends)
+        start, end = min(starts_g), max(ends_g)
         nodes = sorted({str(e["network_element_id"]) for e in eps})
-        sub = points
-        if "_ts" in sub.columns:
-            sub = sub[(sub["_ts"] >= start) & (sub["_ts"] <= end)]
+        if ts_ns is None:
+            sub = points
+        else:
+            # NaT encodes as the int64 minimum, so it sorts to the front and is
+            # excluded by ``lo`` -- exactly as the old ``>= start`` mask did.
+            lo = int(np.searchsorted(ts_ns, np.int64(start.value), side="left"))
+            hi = int(np.searchsorted(ts_ns, np.int64(end.value), side="right"))
+            sub = points.iloc[lo:hi].sort_index(kind="stable")
         if "network_element_id" in sub.columns:
             sub = sub[sub["network_element_id"].astype(str).isin(nodes)]
         timeline = []
@@ -373,6 +401,11 @@ def build_incidents(
         "clusters": clusters,
         "affinity_edges": affinity_edges,
     }
+    if max_edges > 0:
+        # Only present when a cap is actually in force, so an uncapped payload
+        # stays byte-identical to the pre-optimisation reference.
+        result["affinity_edges_total"] = edges_total
+        result["affinity_edges_truncated"] = edges_total > len(affinity_edges)
     log.info("incidentization: %d episodes -> %d incidents", n, len(incidents))
     return incidents, result
 
