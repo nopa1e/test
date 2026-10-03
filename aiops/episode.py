@@ -120,6 +120,18 @@ def build_episodes(point_df: pd.DataFrame, cfg: PipelineConfig, dataset_name: st
             last_val = float(abn_window.iloc[-1]["_score"])
             denom_minutes = max(1.0, float(duration))
             growth_rate = float((last_val - first_val) / denom_minutes)
+            if duration == 0:
+                # A single-bin episode has start == end, i.e. a zero-width
+                # window.  Scoring matches windows by Dice, and a zero-width
+                # window can never clear the 0.4 gate, so such a prediction is
+                # dead on arrival.  One anomalous bin represents one whole bin,
+                # so widen it to a single bin.  Deliberately placed AFTER both
+                # filters above: with the baseline min_duration=5 these episodes
+                # are already gone, so this is a no-op for the baseline config.
+                # (recovery_time for such an episode already equals
+                # start + bin_minutes, so the widened window is consistent.)
+                duration = int(cfg.bin_minutes)
+                end = start + pd.Timedelta(minutes=duration)
             episode_id = f"EP_{base}_{neid}_{group_idx:04d}"
             rows.append({
                 "episode_id": episode_id,
