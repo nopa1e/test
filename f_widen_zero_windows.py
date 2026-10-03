@@ -39,6 +39,12 @@ def main() -> None:
     ap.add_argument("--min-width-b2", type=float, default=None,
                     help="第二批（20260917~20260924）的窗口宽度下限。实测第二批"
                          "应保持短窗（约 2~3 分钟），夹到 10 分钟会亏 1.04。")
+    ap.add_argument("--max-width-b1", type=float, default=None,
+                    help="第一批的窗口宽度上限：宽于此值的窗口把终点前移到该值。"
+                         "S_AD = 0.7 + 0.3*max(0, 1-(|Δ起|+|Δ止|)/360)，真值约 10.4 "
+                         "分钟时 30 分钟的窗 |Δ止|≈1176 秒，直接钉回地板 0.70。")
+    ap.add_argument("--max-width-b2", type=float, default=None,
+                    help="第二批的窗口宽度上限。")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -50,9 +56,18 @@ def main() -> None:
             return a.min_width_b2
         return None
 
+    def cap_for(s: datetime) -> float | None:
+        d = s.strftime("%Y%m%d")
+        if "20260819" <= d <= "20260902":
+            return a.max_width_b1
+        if "20260917" <= d <= "20260924":
+            return a.max_width_b2
+        return None
+
     rows = [json.loads(line) for line in open(a.base, encoding="utf-8") if line.strip()]
     delta = timedelta(minutes=a.bin_minutes)
     widened = 0
+    narrowed = 0
     out = []
     for r in rows:
         s = datetime.fromisoformat(r["start_time"])
@@ -60,6 +75,7 @@ def main() -> None:
         if e < s:
             raise SystemExit(f"negative window in {r['prediction_id']}")
         floor = floor_for(s)
+        cap = cap_for(s)
         target = None
         if e == s:
             target = s + delta                      # 零宽：补一个栅格宽
@@ -71,6 +87,10 @@ def main() -> None:
             r = dict(r)
             r["end_time"] = target.isoformat()
             widened += 1
+        elif cap is not None and (e - s) > timedelta(minutes=cap):
+            r = dict(r)
+            r["end_time"] = (s + timedelta(minutes=cap)).isoformat()
+            narrowed += 1
         out.append(r)
 
     # 自检：除 end_time 外一字不改
@@ -85,7 +105,8 @@ def main() -> None:
         if x.get("fault_category") != y.get("fault_category"):
             bad += 1
     print(f"{a.base}: {len(rows)} 行, 加宽 {widened} 条 "
-          f"({widened / max(1, len(rows)) * 100:.1f}%), 自检异常 {bad}")
+          f"({widened / max(1, len(rows)) * 100:.1f}%), 压窄 {narrowed} 条 "
+          f"({narrowed / max(1, len(rows)) * 100:.1f}%), 自检异常 {bad}")
     if bad:
         raise SystemExit("self-check failed; refusing to write")
 
