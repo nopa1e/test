@@ -32,8 +32,23 @@ def main() -> None:
     ap.add_argument("--base", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--bin-minutes", type=int, default=5)
+    ap.add_argument("--min-width-b1", type=float, default=None,
+                    help="第一批（窗口起始于 20260819~20260902）的窗口宽度下限，"
+                         "窄于此值的加宽到该值，保持起点不动（onset 锚定）。"
+                         "§18 实测第一批最优约 10 分钟；§25 实测起点锚定优于居中。")
+    ap.add_argument("--min-width-b2", type=float, default=None,
+                    help="第二批（20260917~20260924）的窗口宽度下限。实测第二批"
+                         "应保持短窗（约 2~3 分钟），夹到 10 分钟会亏 1.04。")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
+
+    def floor_for(s: datetime) -> float | None:
+        d = s.strftime("%Y%m%d")
+        if "20260819" <= d <= "20260902":
+            return a.min_width_b1
+        if "20260917" <= d <= "20260924":
+            return a.min_width_b2
+        return None
 
     rows = [json.loads(line) for line in open(a.base, encoding="utf-8") if line.strip()]
     delta = timedelta(minutes=a.bin_minutes)
@@ -44,9 +59,17 @@ def main() -> None:
         e = datetime.fromisoformat(r["end_time"])
         if e < s:
             raise SystemExit(f"negative window in {r['prediction_id']}")
+        floor = floor_for(s)
+        target = None
         if e == s:
+            target = s + delta                      # 零宽：补一个栅格宽
+        if floor is not None and (e - s) < timedelta(minutes=floor):
+            cand = s + timedelta(minutes=floor)
+            if target is None or cand > target:
+                target = cand
+        if target is not None and target > e:
             r = dict(r)
-            r["end_time"] = (s + delta).isoformat()
+            r["end_time"] = target.isoformat()
             widened += 1
         out.append(r)
 
