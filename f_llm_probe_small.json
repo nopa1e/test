@@ -1,0 +1,246 @@
+[
+ {
+  "region": "beida",
+  "iid": "INC_beida_20260819040000_20260902040000_0603",
+  "gap": 26968428.08888889,
+  "parsed": {
+   "root_cause": "fw",
+   "reason": "fw的disk_read_rate peak_z=330410.7，rel=+330410.67，这是一个非常高的值，远超其他设备。同时，fw的cpu_usage和disk_write_rate也有显著的异常。",
+   "excluded": [
+    "br-1: load1和load5的异常可能与网络流量有关，但它们的异常程度相对较低。",
+    "br-2: cpu_usage的异常可能与网络流量有关，但其异常程度相对较低。",
+    "cr-1: disk_io_util和disk_write_rate的异常可能与存储压力有关，但其异常程度相对较低。",
+    "cr-2: disk_io_util和disk_write_rate的异常可能与存储压力有关，但其异常程度相对较低。",
+    "service-vm-1: disk_read_rate的异常可能与应用层的数据处理有关，但其异常程度相对较低。",
+    "service-vm-2: disk_io_util的异常可能与存储压力有关，但其异常程度相对较低。",
+    "service-vm-3: disk_io_util的异常可能与存储压力有关，但其异常程度相对较低。",
+    "traffic-vm: disk_read_rate的异常可能与网络流量有关，但其异常程度相对较低。"
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 3189
+ },
+ {
+  "region": "beida",
+  "iid": "INC_beida_20260819040000_20260902040000_0604",
+  "gap": 26968428.08888889,
+  "parsed": {
+   "root_cause": "service-vm-1",
+   "reason": "disk_read_rate peak_z=27482521.6 rel=+27482521.60，远高于其他设备，表明该设备存在独立的严重问题。",
+   "excluded": [
+    "br-1: CPU负载异常，但其他设备也有类似问题，可能由service-vm-1引发。",
+    "br-2: 磁盘IO异常，可能与service-vm-1的高负载有关。",
+    "cr-1: 磁盘空间满，可能与其他设备的高IO有关。",
+    "cr-2: 磁盘IO异常，可能与service-vm-1的高负载有关。",
+    "fw: 磁盘读取速率异常高，但远低于service-vm-1，可能由后者引发。",
+    "service-vm-2: IO利用率异常，可能与service-vm-1的高负载有关。",
+    "service-vm-3: IO和CPU异常，可能与service-vm-1的高负载有关。",
+    "traffic-vm: 磁盘读取速率高，但远低于service-vm-1，可能由后者引发。"
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 2714
+ },
+ {
+  "region": "beida",
+  "iid": "INC_beida_20260819040000_20260902040000_0477",
+  "gap": 7448397.216577328,
+  "parsed": {
+   "root_cause": "fw",
+   "reason": "fw的disk_read_rate peak_z=7448405.3和disk_write_rate peak_z=2957.6异常高，远超其他设备，表明其磁盘IO严重问题，无法被其他设备的异常解释。",
+   "excluded": [
+    "br-1: filesystem_used_ratio peak_z=2.7，但相对变化率低，可能只是历史峰值。",
+    "br-2: load和disk_io_util异常，但数值远低于fw。",
+    "cr-1: process_count和open_fd_ratio高，但相对变化率低。",
+    "cr-2: open_fd_ratio和filesystem_used_ratio高，但数值远低于fw。",
+    "service-vm-1: cpu_usage和disk_io_util高，但数值远低于fw。",
+    "service-vm-2: process_count和disk_io_util高，但数值远低于fw。",
+    "service-vm-3: process_count和disk_io_util高，但数值远低于fw。",
+    "traffic-vm: swap_used_ratio和disk_io_util高，但数值远低于fw。"
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 2549
+ },
+ {
+  "region": "beida",
+  "iid": "INC_beida_20260819040000_20260902040000_0474",
+  "gap": 5710370.133333333,
+  "parsed": {
+   "root_cause": "fw",
+   "reason": "fw的disk_read_rate peak_z=7448405.3，rel=+7448405.33；disk_write_rate peak_z=3038.7，rel=+1808.19；disk_io_util peak_z=89.8，rel=+352.30。这些指标远高于其他设备，表明fw的磁盘I/O出现严重异常，可能是整个网络的瓶颈。",
+   "excluded": [
+    "br-1: disk_write_rate peak_z=8.8，rel=+14.16，异常但远低于fw。",
+    "br-2: load1 peak_z=2.5，rel=+8.00，可能与fw无关。",
+    "cr-1: open_fd_ratio peak_z=4.2，rel=+0.02，异常轻微。",
+    "cr-2: load5 peak_z=5.1，rel=+3.00，可能与fw无关。",
+    "service-vm-1: process_count peak_z=2.7，rel=+0.03，异常轻微。",
+    "service-vm-2: process_count peak_z=5.3，rel=+0.07，异常轻微。",
+    "service-vm-3: disk_read_rate peak_z=1738035.2，rel=+1738035.20，可能与fw有关，但数值远低于fw。",
+    "traffic-vm: swap_used_ratio peak_z=7.9，rel=+0.01，可能与fw无关。"
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 3439
+ },
+ {
+  "region": "beida",
+  "iid": "INC_beida_20260819040000_20260902040000_0470",
+  "gap": 2172452.7633743393,
+  "parsed": {
+   "root_cause": "traffic-vm",
+   "reason": "disk_read_rate peak_z=2172484.3 rel=+2172484.27; disk_write_rate peak_z=607.2 rel=+205.15; inode_used_ratio peak_z=119651.5 rel=+0.25",
+   "excluded": [
+    "br-1: 磁盘写入率和IO利用率异常，但文件系统使用率正常，可能与其他设备的磁盘问题有关",
+    "br-2: CPU使用率异常高，但内存可用率正常，可能与其他设备的负载有关",
+    "cr-1: CPU使用率增加，但不如其他设备明显，可能与其他设备的负载有关",
+    "cr-2: CPU和负载异常，但不如traffic-vm明显，可能与其他设备的负载有关",
+    "fw: 负载和CPU使用率异常，可能与其他设备的负载有关",
+    "service-vm-1: 磁盘IO利用率增加，但不如traffic-vm明显，可能与其他设备的磁盘问题有关",
+    "service-vm-2: 磁盘写入率和IO利用率异常，但不如traffic-vm明显，可能与其他设备的磁盘问题有关",
+    "service-vm-3: 负载和磁盘IO利用率增加，但不如traffic-vm明显，可能与其他设备的负载有关"
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 3165
+ },
+ {
+  "region": "xian",
+  "iid": "INC_xian_20260819040000_20260902040000_0748",
+  "gap": 8475389.770165127,
+  "parsed": {
+   "root_cause": "service-vm-3",
+   "reason": "service-vm-3的disk_read_rate peak_z=8475443.2，rel=+8475443.20；disk_write_rate peak_z=7057.5，rel=+4288.37；load5 peak_z=499.7，rel=+144.00。这些指标异常高，远超其他设备，无法被其他设备的异常所解释。",
+   "excluded": [
+    "br-1: 其他设备的异常指标相对较低，且可能与网络流量有关。",
+    "br-2: 同上，异常指标相对较低。",
+    "cr-1: 异常指标较低，且可能与网络流量有关。",
+    "cr-2: 异常指标较高，但远低于service-vm-3。",
+    "fw: 异常指标较高，但远低于service-vm-3。",
+    "service-vm-1: 异常指标较高，但远低于service-vm-3。",
+    "service-vm-2: 异常指标较高，但远低于service-vm-3。",
+    "traffic-vm: 异常指标较高，但远低于service-vm-3。"
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 2342
+ },
+ {
+  "region": "xian",
+  "iid": "INC_xian_20260819040000_20260902040000_0749",
+  "gap": 4178171.3855075156,
+  "parsed": {
+   "root_cause": "service-vm-3",
+   "reason": "disk_read_rate peak_z=4178196.7 rel=+4178196.72 和 disk_write_rate peak_z=313.6 rel=+300.71 显示了极高的磁盘读写率，远超其他设备，表明该设备可能出现了严重的磁盘问题或异常流量，无法被其他设备的异常所解释。",
+   "excluded": [
+    {
+     "device": "fw",
+     "reason": "fw的异常可能是由于处理了来自service-vm-3的高流量，而不是自身的问题。"
+    },
+    {
+     "device": "br-1",
+     "reason": "br-1的异常可能是因为处理了来自service-vm-3的高流量，而不是自身的问题。"
+    },
+    {
+     "device": "br-2",
+     "reason": "br-2的异常可能是因为处理了来自service-vm-3的高流量，而不是自身的问题。"
+    },
+    {
+     "device": "cr-1",
+     "reason": "cr-1的异常可能是因为处理了来自service-vm-3的高流量，而不是自身的问题。"
+    },
+    {
+     "device": "cr-2",
+     "reason": "cr-2的异常可能是因为处理了来自service-vm-3的高流量，而不是自身的问题。"
+    },
+    {
+     "device": "service-vm-1",
+     "reason": "service-vm-1的异常可能是因为连接到了service-vm-3，处理了相关的数据，而不是自身的问题。"
+    },
+    {
+     "device": "service-vm-2",
+     "reason": "service-vm-2的异常可能是因为连接到了service-vm-3，处理了相关的数据，而不是自身的问题。"
+    },
+    {
+     "device": "traffic-vm",
+     "reason": "traffic-vm的异常可能是因为处理了来自service-vm-3的高流量，而不是自身的问题。"
+    }
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 3440
+ },
+ {
+  "region": "xian",
+  "iid": "INC_xian_20260819040000_20260902040000_0470",
+  "gap": 4137679.9102766407,
+  "parsed": {
+   "root_cause": "traffic-vm",
+   "reason": "disk_read_rate peak_z=4137688.2 rel=+4137688.18，异常值远超其他设备，表明该设备存在严重I/O瓶颈，可能是整个网络的性能瓶颈。",
+   "excluded": [
+    "br-1: process_count和disk_io_util异常可能与traffic-vm的高负载有关。",
+    "br-2: load1异常可能与traffic-vm的高负载有关。",
+    "cr-1: process_count和open_fd_ratio异常可能与traffic-vm的高负载有关。",
+    "cr-2: load5异常可能与traffic-vm的高负载有关。",
+    "fw: disk_io_util异常可能与traffic-vm的高负载有关。",
+    "service-vm-1: load5和load1异常可能与traffic-vm的高负载有关。",
+    "service-vm-2: load5、load1和cpu_usage异常可能与traffic-vm的高负载有关。",
+    "service-vm-3: disk_io_util、cpu_usage异常可能与traffic-vm的高负载有关。"
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 3073
+ },
+ {
+  "region": "xian",
+  "iid": "INC_xian_20260819040000_20260902040000_0330",
+  "gap": 1870106.0360284394,
+  "parsed": null,
+  "raw_len": 3761
+ },
+ {
+  "region": "xian",
+  "iid": "INC_xian_20260819040000_20260902040000_0329",
+  "gap": 1869380.2666666666,
+  "parsed": {
+   "root_cause": "service-vm-2",
+   "reason": "disk_read_rate peak_z=1870108.4，disk_write_rate peak_z=5048.0，disk_io_util peak_z=86.3，这些指标远高于其他设备，表明该设备存在严重的磁盘I/O问题，无法由其他设备的异常解释。",
+   "excluded": [
+    {
+     "设备": "br-1",
+     "理由": "虽然disk_io_util和cpu_usage有异常，但数值远低于service-vm-2，可能由其他原因引起。"
+    },
+    {
+     "设备": "br-2",
+     "理由": "disk_io_util和cpu_usage异常，但数值也远低于service-vm-2，可能与I/O争用有关。"
+    },
+    {
+     "设备": "cr-1",
+     "理由": "cpu_usage和process_count异常，但数值较低，可能与处理流量有关。"
+    },
+    {
+     "设备": "cr-2",
+     "理由": "cpu_usage和load指标异常，但数值远低于service-vm-2，可能与处理负载有关。"
+    },
+    {
+     "设备": "fw",
+     "理由": "cpu_usage和inode_used_ratio异常，但数值较低，可能与防火墙处理流量有关。"
+    },
+    {
+     "设备": "service-vm-1",
+     "理由": "disk_read_rate和disk_write_rate异常，但数值远低于service-vm-2，可能与应用负载有关。"
+    },
+    {
+     "设备": "service-vm-3",
+     "理由": "disk_io_util异常，但数值远低于service-vm-2，可能与应用负载有关。"
+    },
+    {
+     "设备": "traffic-vm",
+     "理由": "disk_read_rate和disk_write_rate异常，但数值远低于service-vm-2，可能与流量处理有关。"
+    }
+   ],
+   "confidence": 0.95
+  },
+  "raw_len": 2655
+ }
+]
