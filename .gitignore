@@ -21,3 +21,5 @@ _archive/
 
 # LLM 实验产物
 llm_rootcause_out/
+llm_cat_out/
+llm_rootcause_out/
