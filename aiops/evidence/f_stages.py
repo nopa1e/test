@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..dataset import canonical_node, discover_datasets
+from ..dataset import canonical_node, discover_datasets, official_network_element_ids
 from ..utils import get_logger
 from .candidate_generator import build_candidates
 from .flow_evidence import build_flow_evidence
@@ -157,6 +157,20 @@ def expand_incidents_with_topology(
                 if len(seen) >= max_nodes:
                     break
             frontier = nxt
+        # 官方网元清单共 10 个，而拓扑可达集只有 9 个——``monitor-vm`` 在全部
+        # 7 张观测表里出现 0 次（2026-10-05 实测），因此在 adjacency 里孤立，
+        # BFS 永远到不了它。但官方 README 明确把 ``monitor-vm`` 列为合法根因，
+        # 缺了它就会出现"真值是它、而我们连候选都没有"的**不可恢复盲区**。
+        # 故用官方清单补齐到 10 个；补在末尾——它零观测、排序里自然垫底，
+        # 不会挤占任何有证据支撑的候选。
+        ds_name = str(incident.get("dataset") or "")
+        region = ds_name.split("_")[0] if ds_name else ""
+        if region:
+            for nid in official_network_element_ids(region):
+                key = canonical_node(nid)
+                if key and key not in seen:
+                    seen.append(key)
+
         clone = dict(incident)
         clone["seed_nodes"] = seeds
         clone["nodes"] = seen
