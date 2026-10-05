@@ -58,6 +58,58 @@ def _cusum_change_point(values: np.ndarray, baseline: np.ndarray, stamps) -> tup
     return idx, stamp_arr[idx]
 
 
+#: z 值的稳健尺度下界（基线中位量级的 1%）与截断上限。
+_Z_CLIP = 200.0
+
+
+def _robust_scale(b: np.ndarray, a: np.ndarray, b_med: float) -> float:
+    """基线尺度的稳健估计，用于替代 ``np.std``。
+
+    为什么必须换掉 ``np.std``
+    ------------------------
+    对**基线过于安静**的指标，std 会退化到接近 0，而 ``z = (peak - b_med) / sigma``
+    随即爆炸。实测（2026-10-04，8 区域 metric_evidence，按 incident 取最大 z）：
+
+        指标                  中位     p99        最大
+        disk_read_rate        0.00     0.1    27,482,521
+        disk_write_rate       0.49    11.4       318,760
+        inode_used_ratio      0.00    10.5       119,652
+        cpu_usage             0.54    26.9           593
+
+    ``disk_read_rate`` 的 p99 只有 0.1、最大值却是 2748 万——跨 9 个数量级。
+    原防护 ``np.std(b) if np.std(b) > 1e-12 else 1.0`` **阈值太低**：
+    std 只要大于 1e-12 就放行，1e-5 的 std 照样算出上千万的 z。
+
+    影响面：``_resource_subtype``（扫全部指标按 z 挑最强子族 -> 必然挑中
+    disk_read_rate -> 判成 disk_io_pressure）、``local_anomaly``（权重 0.20）、
+    以及喂给 LLM 的全部证据。
+
+    做法（两处稳健化）
+    ------------------
+    1. **尺度用 MAD**：中位绝对偏差 x1.4826（正态下等于 sigma），
+       对极端值不敏感——不会因基线里有几个尖峰把尺度撑大，也不会因基线安静塌到 0。
+    2. **下界四个候选取最大**：只用基线中位数会失效——``disk_read_rate`` 的基线
+       **恒为 0**，MAD 也是 0，于是下界退化成一个无意义的极小值、z 仍是天文数字。
+       故同时看基线 p95 与**事故期自身的量级**，让"基线全零但事故期非零"这种情形
+       拿到一个有物理意义的尺度。
+    3. **截断 200 作保险**：只挡真正的退化情形，不参与正常判别
+       （实测正常指票的 z 在个位到几十）。
+    """
+    cands = [
+        abs(float(b_med)) * 0.01,
+        abs(float(np.percentile(b, 95))) * 0.01 if b.size else 0.0,
+        abs(float(np.median(a))) * 0.01 if a.size else 0.0,
+        abs(float(np.percentile(a, 95))) * 0.01 if a.size else 0.0,
+    ]
+    floor = max(max(cands), 1e-12)
+    if b.size < 2:
+        return floor
+    mad = float(np.median(np.abs(b - b_med))) * 1.4826
+    p5, p95 = np.percentile(b, [5, 95])
+    span_sigma = float(p95 - p5) / 3.29
+    return max(mad, span_sigma, floor)
+
+
 def _series_stats(baseline: pd.Series, incident: pd.Series, base_stamps, inc_stamps) -> dict | None:
     b = baseline.to_numpy(dtype=float)
     a = incident.to_numpy(dtype=float)
@@ -74,7 +126,13 @@ def _series_stats(baseline: pd.Series, incident: pd.Series, base_stamps, inc_sta
     trough = float(np.min(a))
     # Relative change uses the baseline median; guard against a zero baseline
     # (many interface counters are legitimately 0 for most of the day).
-    denom = abs(b_med) if abs(b_med) > 1e-9 else (abs(b_p95) if abs(b_p95) > 1e-9 else 1.0)
+    # 分母退化保护：原实现在 |b_med| 与 |b_p95| 都趋近 0 时退化成 1.0，
+    # 于是 relative_change 变成指标的**原始量级**——速率类指标可达千万
+    # （探针实测出现过 rel=+27482521.60），而 local_anomaly 正是取 max(|severity|)。
+    # 改为用事故期自身的量级兜底：基线全零时，"事故期有值"本身就是相对变化 ~1。
+    denom = abs(b_med) if abs(b_med) > 1e-9 else (
+        abs(b_p95) if abs(b_p95) > 1e-9 else max(
+            abs(float(np.median(a))), abs(float(np.percentile(a, 95))), 1.0))
     relative_change = (peak - b_med) / denom
     drop_ratio = (b_med - trough) / denom
 
@@ -91,7 +149,10 @@ def _series_stats(baseline: pd.Series, incident: pd.Series, base_stamps, inc_sta
         "incident_min": trough,
         "relative_change": float(relative_change),
         "drop_ratio": float(drop_ratio),
-        "peak_z": float((peak - b_med) / (np.std(b) if np.std(b) > 1e-12 else 1.0)),
+        # 见 _robust_scale 的说明：std 在基线安静时会退化成 0，
+        # 使 z 爆炸到千万量级。改用 MAD 并截断作保险。
+        "peak_z": float(np.clip((peak - b_med) / _robust_scale(b, a, b_med),
+                                -_Z_CLIP, _Z_CLIP)),
         "first_anomaly_time": _iso(inc_stamps[idx]) if idx is not None and idx < len(inc_stamps) else None,
         "peak_time": _iso(inc_stamps[int(np.argmax(a))]),
         "change_point": _iso(changed_at) if changed_at is not None else None,
