@@ -656,7 +656,21 @@ def stage_predictive(args: argparse.Namespace) -> int:
 #: incident (554/554 on xian), whereas routing evidence covers a minority, so
 #: this is what actually widens category coverage.
 #: resource 子类的最弱 z 门槛。低于它视为无可判资源异常，交回上层回退。
-_RESOURCE_Z_MIN = 3.0
+#: resource 子族的 z 门槛。2026-10-05 从 3.0 提到 30.0。
+#: 原值 3.0 是在 **std 版 z** 上定的；换成 MAD 版尺度后 z 分布整体位移，
+#: cpu_usage 的 z **中位数变成 3.03**——阈值卡在中位数上，意味着一半以上的
+#: cpu 值都能过线，于是 cpu_pressure 在 100% 的 incident 上命中，
+#: 主导地位只是从 disk 换到了 cpu（实测 52.6%->67.6%）。
+#: 实测分位（MAD z，按 incident 取最强 resource z）：
+#:   p50=31.25  p70=49.54  p90=133.33  p95=200(撞截断)
+#: 按先验（resource 大类占真值 21.4%）反解应为 ~70.5，但该值落在截断区，
+#: 照它定阈值等于让阈值被"被截断的假信号"决定，故只取 30.0——
+#: 它是"真正的异常门槛"，且与 _FW_CPU_Z_MIN=8.0 的相对关系合理。
+#: 更精确的校准需要真值，当前只能用先验占比近似。
+_RESOURCE_Z_MIN = 30.0
+
+#: 回退分支的最低信号门槛：对应指标至少要有可观测偏离，否则不返回 resource。
+_RESOURCE_FALLBACK_Z_MIN = 3.0
 
 
 def _resource_subtype(payload: dict | None) -> tuple[str, float] | None:
@@ -700,8 +714,22 @@ def _resource_subtype(payload: dict | None) -> tuple[str, float] | None:
     # 向后兼容回退：全部子族都很弱时，沿用旧的「top_metrics 前三个里能对上就取」
     # 行为。缺了这一步，原本能命中 resource 的样本会掉给 base 类别
     # （实测会让 122 条 resource 变成 base 的 link/rate_limit，属回归）。
+    #
+    # 2026-10-05 修正：这个回退原先**无条件返回**，于是 top_metrics[:3] 里只要
+    # 有 cpu_usage / disk_io_util（几乎总是有）就必中——**把 _RESOURCE_Z_MIN
+    # 完全架空**。实测：把阈值从 3.0 提到 30.0，命中数纹丝不动（17973 -> 17973，
+    # 仍是 100% 的 incident），只是把归属从 cpu 挪给了 disk。
+    # 改为要求**最低信号**：对应指标至少要有可观测的偏离。否则返回 None，
+    # 让类别判定链落到后面的分支。这样阈值才真正起作用。
+    strongest = 0.0
     for entry in (payload.get("top_metrics") or [])[:3]:
         name = str(entry.get("metric") or "")
+        try:
+            strongest = max(strongest, float(entry.get("peak_z") or 0.0))
+        except (TypeError, ValueError):
+            continue
+        if strongest < _RESOURCE_FALLBACK_Z_MIN:
+            continue
         for sub, columns in _METRIC_FAMILY:
             if name in columns:
                 return (sub, 0.0)
