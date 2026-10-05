@@ -19,7 +19,7 @@ def one(i):
     except Exception:
         return time.time()-t, 0, False
 import sys
-for conc in (8, 24, 48):
+for conc in (16, 32, 64):
     N = conc * 2
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=conc) as ex:
