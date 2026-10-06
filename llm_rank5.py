@@ -184,6 +184,24 @@ def main() -> None:
     mi = metric.get("incidents") or {}
 
     def anomalous_count(iid: str) -> int:
+        """§43.6 的原始定义：`local_anomaly >= 0.5` 的**设备台数**。
+
+        注意不能用 severity 代替——§43.1/§43.6 记录的分布
+        （1台 54.0% / 2台 30.8% / 3台 10.7% / 4台+ 4.5%，即 >=3台 = 15.2%）
+        是按 `local_anomaly` 统计的。用 severity>=1.0 会得到 99.8%，完全跑偏。
+        """
+        p = incs.get(iid) or {}
+        c = 0
+        for cand in (p.get("candidates") or []):
+            ss = cand.get("sub_scores") or {}
+            try:
+                if float(ss.get("local_anomaly") or 0.0) >= a.anom_severity_min:
+                    c += 1
+            except (TypeError, ValueError):
+                pass
+        if p.get("candidates"):
+            return c
+        # 退化路径：candidates.json 没有分项时用 severity 兜底
         payload = mi.get(iid) or {}
         c = 0
         for _nd, np_ in (payload.get("nodes") or {}).items():
@@ -193,7 +211,7 @@ def main() -> None:
                     best = max(best, abs(float(st.get("severity") or 0.0)))
                 except (TypeError, ValueError):
                     pass
-            if best >= a.anom_severity_min:
+            if best >= 1.0:
                 c += 1
         return c
 
