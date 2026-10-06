@@ -35,7 +35,8 @@ import pandas as pd
 from .cross_region import role_key
 from ..dataset import DatasetInfo, canonical_node
 from ..utils import get_logger
-from .root_score import ROOT_SCORE_WEIGHTS, combine, explain, minmax, rank_priority
+from .root_score import (ROOT_SCORE_WEIGHTS, combine, explain, minmax,
+                          rank_priority, saturate_local)
 
 log = get_logger(__name__)
 
@@ -419,7 +420,9 @@ def build_candidates(
         # 默认关闭（cross_region=None），既有行为逐字节不变。
         if cross_region:
             local_raw = _apply_cross_region(local_raw, incident, cross_region)
-        local = minmax(local_raw)
+        # §43.5 ③：保留绝对量级，不用组内 minmax（否则 A 组的
+        # "够异常设备台数" 判据会把「一台微动」也撑成 1.0）。
+        local = saturate_local(local_raw)
 
         timing = {node: (slot.get("timing") or {}) for node, slot in store.items()}
         times = {node: _ts(info.get("first_anomaly_time")) for node, info in timing.items()}

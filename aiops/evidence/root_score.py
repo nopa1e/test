@@ -17,6 +17,8 @@ against it, is a worse root-cause candidate, not a better one.
 
 from __future__ import annotations
 
+import math
+
 from collections.abc import Mapping, Sequence
 
 #: Verbatim from spec 5.9.  Do not tune against the official evaluator.
@@ -52,6 +54,38 @@ def minmax(values: Mapping[str, float]) -> dict[str, float]:
     if hi - lo <= 1e-12:
         return {key: 0.0 for key in values}
     return {key: (value - lo) / (hi - lo) for key, value in values.items()}
+
+
+#: ``local_anomaly`` 的饱和尺度常数：raw = ``_local_magnitude``（无界 |relative_change|）。
+#: 取 zB1 全量 severity 的 p99 量级（约 175），使 raw=median(5)->0.35、p90(17)->0.56、
+#: p99(175)->1.0。见工作文档 §43.5 ③ / §55.4。
+LOCAL_SATURATION_K = 175.0
+
+
+def saturate_local(
+    values: Mapping[str, float], k: float = LOCAL_SATURATION_K
+) -> dict[str, float]:
+    """保**绝对量级**地把 ``_local_magnitude`` 压到 [0, 1]（见 §43.5 ③）。
+
+    与 :func:`minmax` 的关键差别：minmax 算的是**组内**相对值，所以
+    「9 台都很平静、只有一台微动」也会被撑成 1.0/0.0，让
+    "够异常的设备台数 = local_anomaly>=0.5 的台数" 这个判据误判。
+    这里用绝对对数尺度：只有 raw<=0 才给 0，其余按 ``log1p`` 压缩，K 对应 p99。
+    """
+    import math
+
+    denom = math.log1p(max(float(k), 1e-9)) or 1.0
+    out: dict[str, float] = {}
+    for key, value in values.items():
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            v = 0.0
+        if not v > 0.0:            # raw<=0 以及 NaN
+            out[key] = 0.0
+        else:
+            out[key] = min(1.0, math.log1p(v) / denom)
+    return out
 
 
 def clamp01(value: float) -> float:
