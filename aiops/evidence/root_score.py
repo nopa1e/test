@@ -57,9 +57,12 @@ def minmax(values: Mapping[str, float]) -> dict[str, float]:
 
 
 #: ``local_anomaly`` 的饱和尺度常数：raw = ``_local_magnitude``（无界 |relative_change|）。
-#: 取 zB1 全量 severity 的 p99 量级（约 175），使 raw=median(5)->0.35、p90(17)->0.56、
-#: p99(175)->1.0。见工作文档 §43.5 ③ / §55.4。
-LOCAL_SATURATION_K = 175.0
+#: 取 `_local_magnitude` 自身分布的 p99（zB1+zB2 实测 197362），使
+#: "local_anomaly >= 0.5" 对应 raw >= 443.6 这个**绝对**水平。
+#: 注意 175 是错的：那是单个 metric severity 的 p99，而 _local_magnitude
+#: 是跨指标/跨模态取最大，分布高两个数量级（实测 p50=65.8 p90=13556）。
+#: 见工作文档 §43.5 ③ / §55.4 / §56。
+LOCAL_SATURATION_K = 197362.0
 
 
 def saturate_local(
