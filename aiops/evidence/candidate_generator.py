@@ -534,6 +534,8 @@ def build_candidates(
             candidates.append(
                 {
                     "node": node,
+                    # 插桩：_local_magnitude 的原始（未饱和）值，用于标定 LOCAL_SATURATION_K。
+                    "local_magnitude": float(local_raw.get(node, 0.0)),
                     "sub_scores": sub_scores,
                     "root_score": combine(sub_scores),
                     "breakdown": explain(sub_scores),
