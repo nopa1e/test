@@ -102,7 +102,7 @@ for d in dirs:
         if rd >= 0.95:
             rate_ge_095 += 1
         for e in (rinc.get(iid) or []):
-            mn = str(e.get("metric_name") or "")
+            mn = e if isinstance(e, str) else str((e or {}).get("metric_name") or "")
             if mn.startswith("ipv6_default_route"):
                 ipt_events[mn] += 1
     print(f"  {d.split('_')[0]:<11} incidents={n_here}")
