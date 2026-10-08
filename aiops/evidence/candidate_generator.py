@@ -33,6 +33,8 @@ from typing import Any
 import pandas as pd
 
 from .cross_region import role_key
+from .causal_graph import (build_directed_edges, collect_incident_times,
+                        outgoing_incoming, topology_from_adjacency)
 from ..dataset import DatasetInfo, canonical_node
 from ..utils import get_logger
 from .root_score import (ROOT_SCORE_WEIGHTS, combine, explain, minmax,
@@ -356,6 +358,7 @@ def build_candidates(
     filter_k: int = 5,
     max_nodes_per_incident: int = 10,
     cross_region: dict | None = None,
+    causal_graph_mode: bool = False,
 ) -> dict:
     """Build Top-10 / Top-5 candidates with their ``RootScore`` breakdown.
 
@@ -363,6 +366,7 @@ def build_candidates(
     When it is absent the propagation terms fall back to the incident's own
     time order, which is weaker but never invents an edge that does not exist.
     """
+    causal_edges: dict | None = None
     out: dict[str, dict] = {}
 
     for incident in incidents:
@@ -410,6 +414,12 @@ def build_candidates(
             continue
 
         # --- score families -------------------------------------------------
+        if causal_edges is None and causal_graph_mode:
+            # §63：整个区域只估计一次有向传播权重（数据估计，非手设常数）
+            causal_edges = build_directed_edges(
+                topology_from_adjacency(adjacency or {}),
+                collect_incident_times(metric_ev or {}),
+            )
         local_raw = {node: _local_magnitude(slot) for node, slot in store.items()}
         # --- 空间维修正（跨区域一致性）-------------------------------------
         # spec 5.9 的七项权重是常数、不得调权；这里**不新增因子**，而是把
@@ -455,11 +465,16 @@ def build_candidates(
                 (later if other_ts > ts else earlier).append(other)
             # A root cause moves first and explains what follows; a victim has
             # already been explained by something else (spec 5.7/5.9).
-            nb_later = [o for o in later if o in neighbours.get(node, set())] if neighbours else later
-            nb_earlier = [o for o in earlier if o in neighbours.get(node, set())] if neighbours else earlier
             denom = max(1, len(times) - 1)
-            outgoing[node] = len(nb_later) / denom
-            incoming[node] = len(nb_earlier) / denom
+            if causal_edges:
+                _o, _i = outgoing_incoming(times, causal_edges)
+                outgoing[node] = _o.get(node, 0.0)
+                incoming[node] = _i.get(node, 0.0)
+            else:
+                nb_later = [o for o in later if o in neighbours.get(node, set())] if neighbours else later
+                nb_earlier = [o for o in earlier if o in neighbours.get(node, set())] if neighbours else earlier
+                outgoing[node] = len(nb_later) / denom
+                incoming[node] = len(nb_earlier) / denom
 
         modality_counts = {node: len(_modalities(slot)) for node, slot in store.items()}
         cross = {node: min(1.0, count / 3.0) for node, count in modality_counts.items()}

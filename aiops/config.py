@@ -115,6 +115,10 @@ class PipelineConfig:
     # incident_clusters.json.  0 = unlimited (the equivalence reference).
     incident_max_affinity_edges: int = 0
 
+    #: §63：用数据估计的有向因果传播权重替换 outgoing/incoming 的均匀计数
+    #: （对照在先技术 CN122661102A 的"有向依赖图 + 条件概率"）。默认 False。
+    causal_graph: bool = False
+
     # Propagation
     propagation_max_lag_minutes: int = 30
 
