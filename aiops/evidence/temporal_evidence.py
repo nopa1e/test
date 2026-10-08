@@ -72,18 +72,16 @@ def _metric_observations(metric_ev: dict | None, iid: str) -> dict[str, list[tup
                 entry.get("first_anomaly_time") or entry.get("change_point"),
                 f"metric:{entry.get('metric')}",
             )
-        # §65 修复：interface 级观测**必须排除**在 first-mover 之外。
-        #
-        # 实测（zB1/f_full 各 630~640 个 incident）：`interfaces[*][*].change_point`
-        # **恒等于 incident 的窗口起点**（0% 的 incident 能从 interfaces 得到 ≥2 个
-        # 不同时刻）。而本函数随后用 `min` 取每个节点的最早观测，于是这个恒定的
-        # 窗口起点会把 `top_metrics` 里真正有信息的分散时刻**全部盖掉**——
-        # 后果是 `temporal_priority`(权重 0.25) 与 `outgoing/incoming_propagation`
-        # (0.20 / −0.15) 三项结构上恒为 0，七项里 0.30 的权重质量是死的。
-        #
-        # 删掉这一段后，per-node 时刻恢复分散
-        # （INC_0002: br-1=04:46 cr-1=04:56 fw=04:50 traffic-vm=04:58）。
-        # interface 证据本身仍被 metric_evidence 完整保留，只是不再当作"时序"。
+        # Interface-level movers are the only sub-node localisation the old
+        # pipeline never had, so they count as first-mover evidence too.
+        for iface, metrics in (payload.get("interfaces") or {}).items():
+            for metric, stats in (metrics or {}).items():
+                _record(
+                    store,
+                    node,
+                    (stats or {}).get("change_point") or (stats or {}).get("first_anomaly_time"),
+                    f"interface:{iface}:{metric}",
+                )
     return store
 
 
