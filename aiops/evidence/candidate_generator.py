@@ -359,6 +359,7 @@ def build_candidates(
     max_nodes_per_incident: int = 10,
     cross_region: dict | None = None,
     causal_graph_mode: bool = False,
+    zero_temporal: bool = False,
 ) -> dict:
     """Build Top-10 / Top-5 candidates with their ``RootScore`` breakdown.
 
@@ -452,6 +453,11 @@ def build_candidates(
             priority = rank_priority(
                 [node for node, _ in timed], [ts for _, ts in timed]
             )
+
+        if zero_temporal:
+            # §68：把 temporal_priority 压成 0（spec 的权重常数不动），
+            # 用来把 spec 七项里"时序"与"因果"两部分的效应分离开。
+            priority = {k: 0.0 for k in priority}
 
         neighbours = {node: {canonical_node(n) for n in adjacency.get(node, ())} for node in store} if adjacency else {}
 
