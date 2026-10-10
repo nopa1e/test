@@ -68,7 +68,9 @@ class VAE(nn.Module):
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
+        # §70：推理（eval）必须可复现，用均值而非采样；
+        # 训练时保留重参数化采样。此前 eval 下也采样，导致同一模型重复评分会变。
+        z = self.reparameterize(mu, logvar) if self.training else mu
         return self.decode(z), mu, logvar
 
 

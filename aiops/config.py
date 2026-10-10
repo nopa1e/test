@@ -149,4 +149,8 @@ class PipelineConfig:
         d = asdict(self)
         d["workspace"] = str(self.workspace)
         d["output_dir"] = str(self.output_dir)
+        # §70：凭据不得落盘。run_summary.json 会保存本字典，所以这里先脱敏。
+        for key in ("llm_api_key", "api_key", "token", "password"):
+            if d.get(key):
+                d[key] = "***REDACTED***"
         return d

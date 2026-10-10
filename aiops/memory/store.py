@@ -135,21 +135,39 @@ class MemoryStore:
         if hits and hits[0][1] >= self.tau:
             # 加权投票：相似度 × 模板权重
             votes: dict[str, float] = {}
+            # §70：对【大类+子类】这一对投票，而不是"大类投票、子类取最近模板"。
+            # 原写法会拼出自相矛盾的组合（例如 resource + web_slow）。
+            pair_votes: dict[tuple[str, str], float] = {}
             for it, sim in hits:
                 if sim < self.tau * 0.9:
                     continue
-                votes[it.label] = votes.get(it.label, 0.0) + sim * self.alpha * it.weight
+                w = sim * self.alpha * it.weight
+                votes[it.label] = votes.get(it.label, 0.0) + w
+                key = (str(it.label), str(it.sublabel))
+                pair_votes[key] = pair_votes.get(key, 0.0) + w
             top = hits[0][0]                            # 最近的那个模板
             if incident_id:
                 top.hits += 1
                 top.exemplars.append(incident_id)
-            label = max(votes, key=votes.get) if votes else top.label
-            total = sum(votes.values()) or 1.0
-            conf = votes.get(label, 0.0) / total
-            return {"label": label, "sublabel": top.sublabel, "confidence": conf,
+            if pair_votes:
+                label, sublabel = max(pair_votes, key=pair_votes.get)
+                # 枚举校验：不在官方 28 子类内则退回最近模板的标签
+                try:
+                    from ..taxonomy import is_valid_category
+                    if not is_valid_category(label, sublabel):
+                        label, sublabel = top.label, top.sublabel
+                except Exception:
+                    pass
+            else:
+                label, sublabel = top.label, top.sublabel
+            total = sum(pair_votes.values()) or 1.0
+            conf = pair_votes.get((label, sublabel), 0.0) / total
+            return {"label": label, "sublabel": sublabel, "confidence": conf,
                     "matched": True, "template_id": top.template_id,
                     "nearest_sim": hits[0][1], "n_considered": len(hits),
-                    "votes": {k: round(v / total, 3) for k, v in votes.items()}}
+                    "votes": {k: round(v / total, 3) for k, v in votes.items()},
+                    "vote_pairs": {f"{m}/{s}": round(v / total, 3)
+                                   for (m, s), v in pair_votes.items()}}
         # 未命中 -> 新建模板
         tid = self.add("", vector, fallback_label, fallback_sublabel, incident_id)
         self.items[-1].hits = 0        # 新模板不计命中
