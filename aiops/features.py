@@ -228,18 +228,20 @@ def _agg_traffic_flow(ds: DatasetInfo, cfg: PipelineConfig) -> pd.DataFrame:
     return wide
 
 
-def _agg_netflow(ds: DatasetInfo, cfg: PipelineConfig) -> pd.DataFrame:
-    path = ds.path("netflow_5tuple")
-    if path is None:
-        return pd.DataFrame()
-    wanted = ["minute_utc", "region_code", "node_key", "node", "packets", "bytes", "flow_record_count"]
-    try:
-        df = read_table(ds, "netflow_5tuple", nrows=cfg.max_netflow_rows, usecols=lambda c: c in wanted)
-    except Exception:
-        df = read_table(ds, "netflow_5tuple", nrows=cfg.max_netflow_rows)
-    if df.empty:
-        return pd.DataFrame()
-    if "minute_utc" not in df.columns:
+#: §71：netflow 分块读取的行数。分块只是为了控内存，**不改变结果**——
+#: 下面的聚合是 sum，满足结合律，所以"块内聚合再合并"与"一次性全量聚合"逐行等价。
+_NETFLOW_CHUNK_ROWS = 2_000_000
+
+_NETFLOW_KEY = ["timestamp_bin", "region", "node", "node_type"]
+_NETFLOW_VALUE = ["packets", "bytes", "flow_record_count"]
+
+
+def _netflow_frame_to_agg(df: pd.DataFrame, ds: DatasetInfo, cfg: PipelineConfig) -> pd.DataFrame:
+    """把一块（或整块）netflow 原始行，变成按 _NETFLOW_KEY 求和后的表。
+
+    全是逐行变换 + 结合律聚合，所以对任意分块方式结果一致。
+    """
+    if df is None or df.empty or "minute_utc" not in df.columns:
         return pd.DataFrame()
     df = _prepare_time(df, "minute_utc", cfg.bin_minutes)
     if "node_key" in df.columns:
@@ -253,10 +255,67 @@ def _agg_netflow(ds: DatasetInfo, cfg: PipelineConfig) -> pd.DataFrame:
     df["region"] = df["region_code"]
     if "node_type" not in df.columns:
         df["node_type"] = "unknown"
-    num = [c for c in ["packets", "bytes", "flow_record_count"] if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
+    num = [c for c in _NETFLOW_VALUE
+           if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
     if not num:
         return pd.DataFrame()
-    out = df.groupby(["timestamp_bin", "region", "node", "node_type"], observed=True, dropna=False)[num].sum().reset_index()
+    return (df.groupby(_NETFLOW_KEY, observed=True, dropna=False)[num]
+              .sum().reset_index())
+
+
+def _agg_netflow(ds: DatasetInfo, cfg: PipelineConfig) -> pd.DataFrame:
+    """netflow 聚合（§71 修复：不再只读文件头部）。
+
+    原实现用 ``nrows=cfg.max_netflow_rows``（默认 250_000）只读**文件前 25 万行**，
+    文件按时间排序时后面的时间段就没有流量特征。现在改为**分块读完整文件**：
+    每块先按主键求和，再合并求和。因 sum 满足结合律，结果与一次性全量读取一致
+    （验收标准即此）。``cfg.max_netflow_rows <= 0`` 表示不限总量。
+    """
+    path = ds.path("netflow_5tuple")
+    if path is None:
+        return pd.DataFrame()
+    wanted = ["minute_utc", "region_code", "node_key", "node", "packets", "bytes", "flow_record_count"]
+    budget = int(getattr(cfg, "max_netflow_rows", 0) or 0)
+
+    def _chunks(usecols):
+        reader = read_table(ds, "netflow_5tuple", chunksize=_NETFLOW_CHUNK_ROWS,
+                            usecols=usecols)
+        if isinstance(reader, pd.DataFrame):          # 不支持 chunksize 时退化为单块
+            return [reader]
+        return reader
+
+    parts: list[pd.DataFrame] = []
+    seen = 0
+    try:
+        for chunk in _chunks(lambda c: c in wanted):
+            g = _netflow_frame_to_agg(chunk, ds, cfg)
+            if not g.empty:
+                parts.append(g)
+            seen += len(chunk)
+            if budget > 0 and seen >= budget:
+                log.warning("netflow: 达到 max_netflow_rows=%d 上限，后续行未读取"
+                            "（设为 0 可读全量）", budget)
+                break
+    except Exception as exc:
+        log.warning("netflow 分块读取失败，退回不带 usecols 的单遍读取: %s", exc)
+        parts = []
+        try:
+            for chunk in _chunks(None):
+                g = _netflow_frame_to_agg(chunk, ds, cfg)
+                if not g.empty:
+                    parts.append(g)
+        except Exception as exc2:
+            log.warning("netflow 读取彻底失败: %s", exc2)
+            return pd.DataFrame()
+
+    if not parts:
+        return pd.DataFrame()
+    agg = pd.concat(parts, ignore_index=True)
+    num = [c for c in _NETFLOW_VALUE if c in agg.columns]
+    if not num:
+        return pd.DataFrame()
+    out = (agg.groupby(_NETFLOW_KEY, observed=True, dropna=False)[num]
+              .sum().reset_index())
     out = out.rename(columns={c: f"netflow_{c}" for c in num})
     return out
 

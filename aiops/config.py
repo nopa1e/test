@@ -62,7 +62,10 @@ class PipelineConfig:
 
     # sampling / scale guards
     # Feature engineering reads this many netflow rows into the point table.
-    max_netflow_rows: int = 250_000
+    #: §71：netflow 行数上限。0 = 读全量（默认）。
+    #: 原为 250_000，只读文件前 25 万行，文件按时间排序时
+    #: 后面的时间段会整体缺失流量特征。
+    max_netflow_rows: int = 0
     max_routing_labels: int = 500
     max_feature_columns: int = 256
 
