@@ -7872,3 +7872,53 @@ NetFlow 覆盖、Traffic Flow 接入、事件边界）**必须一次一项 + 端
 
 另外注意：`features.py`(原 250k) 与 `flow_evidence.py`(14M) 是**两个不同的 netflow 读取器**，
 口径不一致本身就是问题的一部分；本次只修了前者（后者本就读 1400 万行）。
+---
+
+## 72. NetFlow 特征链与区域失败处理修复（2026-10-11）
+
+本节时间统一为 Asia/Shanghai（UTC+8）。完成时间：2026-10-11 13:18:27。
+
+### 72.1 已复现的问题与代码范围
+
+本轮阅读 §70–§71、历史实验归因与现役数据/运行链后，修复两组问题，分别入库：
+
+- 代码提交 864d466（NetFlow）：/202531630503/lyt/aiops_diagnosis/aiops/features.py 中的正数预算原来在聚合完整块后才检查，设置 3 行可能实际聚合 7 行，回退读取还会丢失预算。现在把预算传给 CSV 读取器，正常/回退路径都精确遵守，并关闭读取器。
+- 同一提交修复主表合并：真实 node_metrics 的 region 是中文名称、node_type 是 br/cr 等；NetFlow 聚合的 region 是英文代码、node_type 是 unknown。旧四键合并完全匹配不上。现在在 DatasetInfo 已限定单区域的前提下，只以 timestamp_bin + canonical node 合并 NetFlow，并验证 many_to_one，保持主表区域、类型和行数。
+- 同一提交修复 /202531630503/lyt/aiops_diagnosis/run_pipeline.py 与 /202531630503/lyt/aiops_diagnosis/run_experiment_f_evidence_agent.py 的基础阶段默认预算：复用 PipelineConfig 的 0（全量）。F 的 flow 证据阶段仍默认 250000，因为该读取器把 0 解释为不读取；显式传参保持原含义。
+- 代码提交 d41652f（运行可靠性）：/202531630503/lyt/aiops_diagnosis/aiops/pipeline.py 原来捕获区域异常后仍返回成功并生成部分预测。现在继续收集所有区域结果，保存 status、failed_datasets 后，只要有失败就抛出异常，使入口退出码非零；不写本次不完整的汇总预测。
+
+失败重跑时既有汇总文件不会被覆盖或删除；它仍属于上一轮，不能仅凭文件存在判断本轮成功。应同时核对退出码和 /<output_dir>/_all/run_summary.json 的 status。
+
+### 72.2 回归与真实命令行验收
+
+新增 /202531630503/lyt/aiops_diagnosis/tests/test_netflow_aggregation.py（9 项）和 /202531630503/lyt/aiops_diagnosis/tests/test_pipeline_completion.py（5 项），共 14 项全部通过。旧代码会在精确预算、回退预算、读者关闭、主表合并、入口默认值、部分/全部区域失败等断言中失败。
+
+从 /202531630503/lyt/aiops_diagnosis 执行：
+python3 -m unittest discover -s /202531630503/lyt/aiops_diagnosis/tests -v
+
+本轮自行构造原始小数据并调用真实命令行，实际运行 IF + VAE 基础流水线：
+- 正常输入：退出码 0，status=success，生成汇总预测。
+- 增加一个不可用区域：退出码 1，status=failed，准确报告 xian_test；本次输出目录没有生成汇总预测。
+- 合成输入主表 72 点，其中 36 点具有匹配流量特征。
+
+### 72.3 北大真实 NetFlow 全量检查（补齐 §71 的原始文件验收）
+
+原始文件：/202531630503/lyt/workspace/data/beida_20260819040000_20260902040000/beida_20260819040000_20260902040000_data/processed/netflow_5tuple_minute_readable.csv
+文件字节数：2709782433；扫描原始行数：13,154,797。
+核对原始分块总量与最终聚合总量：packets=113387461，bytes=140934481741，flow_record_count=13240182，三项完全相等。
+
+- 250000 行对照：39 个聚合点，末桶为本机时间 2026-08-19 12:45。
+- 全量：1960 个聚合点，末桶为本机时间 2026-08-21 04:45；原始文件末条时间为本机时间 2026-08-21 04:48。分桶尾部覆盖正确。
+- 真实 node_metrics 主表 36286 行：旧四键合并匹配 0 行，修复后匹配 1958 行；主表行数未增加。
+- 以上读取与检查共 67.07 秒；这是聚合与合并验证的耗时，不是优化前后的性能对比。
+
+文件本身的末时间早于区域目录名所示的结束时间，故本轮只证明完整覆盖该原始文件，不能声称恢复了整个 14 天的 NetFlow 数据。
+
+### 72.4 产物与结论边界
+
+本轮独立输出目录：/202531630503/lyt/aiops_diagnosis/outputs_experiment_code_optimization_20261011/。
+其中 unit_test_results.json、real_netflow_validation.json、cli_smoke/results.json 保存验证结果；cli_smoke 内保存本轮自建输入、日志和输出。没有复用其他实验的 artifacts。
+
+所有源代码修改先保留原始副本，并记录在 /202531630503/lyt/aiops_diagnosis/修改记录/修改记录.md。继续使用现有 Python/pandas/PyTorch，没有安装依赖。
+
+本轮没有改动根因排序权重、事件窗口、类别规则或最佳提交文件，也没有提交评测。NetFlow 真正进入主表会改变模型输入，属于 B 类改动。尚未完成八区域全流程单变量 A/B，不能据此断言分数提高或替换最佳方案；正式评测仍需用户明确同意。
