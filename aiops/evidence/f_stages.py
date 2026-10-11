@@ -239,9 +239,9 @@ def stage_candidates(args: argparse.Namespace) -> int:
         candidates = build_candidates(
             ds, incidents, temporal_ev=temporal_ev, top_k=args.top_k,
             cross_region=cross_region,
-            adjacency=adjacency, **bundle
-        ,
-            causal_graph_mode=getattr(cfg, "causal_graph", False))
+            adjacency=adjacency, **bundle,
+            causal_graph_mode=getattr(args, "causal_graph", False),
+        )
         (out_dir / "candidates.json").write_text(
             json.dumps(candidates, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
         )

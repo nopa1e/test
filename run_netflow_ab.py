@@ -45,10 +45,13 @@ def run_stage(arm, arguments):
     return main(arguments)
 
 
-def job(experiment, arm, batch, region, commit):
+def job(experiment, arm, batch, region, commit, resume=False):
     workspace, span, minutes = BATCHES[batch]
     out = experiment / arm / batch / region
-    out.mkdir(parents=True, exist_ok=False)
+    out.mkdir(parents=True, exist_ok=resume)
+    previous_path = out / "job_status.json"
+    previous = json.loads(previous_path.read_text()) if resume and previous_path.exists() else {}
+    completed_stages = {s["stage"]: s for s in previous.get("stages", []) if s["returncode"] == 0}
     env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
                MKL_NUM_THREADS="1", LOKY_MAX_CPU_COUNT="1", PYTHONUNBUFFERED="1")
     status = {"arm": arm, "batch": batch, "region": region, "state": "running", "stages": []}
@@ -56,6 +59,18 @@ def job(experiment, arm, batch, region, commit):
         for stage in STAGES:
             if current_commit() != commit:
                 raise RuntimeError("Repository HEAD changed during the experiment")
+            dsout = out / (region + "_" + span)
+            required = {
+                "f6_base": "incident_candidates.json", "evidence": "metric_evidence.json",
+                "flow": "flow_evidence.json", "predictive": "predictive_evidence.json",
+                "candidates": "candidates.json",
+            }
+            artifact = dsout / required[stage] if stage in required else out / "final" / ("predictions_" + region + ".jsonl")
+            if stage in completed_stages and artifact.is_file() and artifact.stat().st_size:
+                status["stages"].append(completed_stages[stage])
+                continue
+            # If a stage must be repeated, invalidate all of its downstream stages.
+            completed_stages.clear()
             status["stage"] = stage
             save(out / "job_status.json", status)
             command = [
@@ -176,14 +191,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--resume", action="store_true", help="Continue only this experiment from its recorded successful stages.")
     args = parser.parse_args()
     output = args.output.resolve()
     assert output.parent == ROOT and output.name.startswith("outputs_experiment_")
     assert not subprocess.check_output(["git", "status", "--short"], cwd=ROOT, text=True).strip()
-    output.mkdir(exist_ok=False)
+    if args.resume and not (output / "experiment_manifest.json").is_file():
+        raise RuntimeError("Resume requires an existing experiment manifest")
+    output.mkdir(exist_ok=args.resume)
+    prior_manifest = json.loads((output / "experiment_manifest.json").read_text()) if args.resume else {}
     commit = current_commit()
     save(output / "experiment_manifest.json", {
-        "commit": commit, "arms": ["off", "on"], "regions": REGIONS,
+        "commit": commit, "previous_commit": prior_manifest.get("commit"),
+        "arms": ["off", "on"], "regions": REGIONS,
         "batches": BATCHES, "stages": STAGES, "workers": args.workers,
         "flow_evidence_budget": 14000000, "netflow_feature_budget": 0,
         "llm": False, "postprocess": {"gate": 0.9, "dedup_dice": 0.95,
@@ -192,7 +212,7 @@ def main():
     })
     results = []
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
-        futures = [pool.submit(job, output, arm, batch, region, commit)
+        futures = [pool.submit(job, output, arm, batch, region, commit, args.resume)
                    for batch in BATCHES for region in REGIONS for arm in ("off", "on")]
         for future in as_completed(futures):
             results.append(future.result())
