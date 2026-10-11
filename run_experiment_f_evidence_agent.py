@@ -327,7 +327,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="affinity_edges 诊断载荷上限（0=不限）。1 分钟分箱时单区域可产出"
                         "数百万条边（数 GB JSON），而下游没有任何消费者读取它。")
     p.add_argument("--vae-epochs", type=int, default=40)
-    p.add_argument("--max-netflow-rows", type=int, default=250_000)
+    p.add_argument("--max-netflow-rows", type=int, default=None,
+                   help="Base: 0 reads all rows (default). Flow evidence: default 250000 kept rows.")
     p.add_argument("--netflow-topology-max-rows", type=int, default=0)
     # Accepted now so the documented command lines stay valid; the LLM and
     # evidence stages that consume them land in later steps.
@@ -361,6 +362,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         "七项权重不变，默认关闭）")
     p.add_argument("--no-llm-rerank", action="store_true", help="finalize: ignore any llm_rerank.json and write the programmatic RootScore order (the production path).")
     args = p.parse_args(argv)
+    if args.max_netflow_rows is None:
+        # The flow evidence reader has a separate budget contract: 0 disables it.
+        args.max_netflow_rows = 250_000 if args.stage == "flow" else PipelineConfig().max_netflow_rows
     args._started_at = _now()
     if args.coarse_pass_minutes:
         p.error("--coarse-pass-minutes (spec 0.4 plan B) is not implemented yet; "

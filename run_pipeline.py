@@ -53,7 +53,8 @@ def main() -> None:
     p.add_argument("--llm-teacher-num-cases", type=int, default=100)
     p.add_argument("--llm-workers", type=int, default=8,
                    help="Concurrency for the LLM teacher and Task A stages.")
-    p.add_argument("--max-netflow-rows", type=int, default=250_000)
+    p.add_argument("--max-netflow-rows", type=int, default=PipelineConfig().max_netflow_rows,
+                   help="Maximum NetFlow feature rows; 0 reads the full file in chunks.")
     args = p.parse_args()
 
     cfg = PipelineConfig(

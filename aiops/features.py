@@ -264,12 +264,10 @@ def _netflow_frame_to_agg(df: pd.DataFrame, ds: DatasetInfo, cfg: PipelineConfig
 
 
 def _agg_netflow(ds: DatasetInfo, cfg: PipelineConfig) -> pd.DataFrame:
-    """netflow 聚合（§71 修复：不再只读文件头部）。
+    """Aggregate NetFlow in chunks; a positive budget is an exact row limit.
 
-    原实现用 ``nrows=cfg.max_netflow_rows``（默认 250_000）只读**文件前 25 万行**，
-    文件按时间排序时后面的时间段就没有流量特征。现在改为**分块读完整文件**：
-    每块先按主键求和，再合并求和。因 sum 满足结合律，结果与一次性全量读取一致
-    （验收标准即此）。``cfg.max_netflow_rows <= 0`` 表示不限总量。
+    A non-positive budget reads the full file. Both the selected-column path
+    and its fallback use the same limit, and close their CSV reader.
     """
     path = ds.path("netflow_5tuple")
     if path is None:
@@ -278,24 +276,24 @@ def _agg_netflow(ds: DatasetInfo, cfg: PipelineConfig) -> pd.DataFrame:
     budget = int(getattr(cfg, "max_netflow_rows", 0) or 0)
 
     def _chunks(usecols):
-        reader = read_table(ds, "netflow_5tuple", chunksize=_NETFLOW_CHUNK_ROWS,
-                            usecols=usecols)
-        if isinstance(reader, pd.DataFrame):          # 不支持 chunksize 时退化为单块
-            return [reader]
-        return reader
+        reader = read_table(
+            ds, "netflow_5tuple", chunksize=_NETFLOW_CHUNK_ROWS,
+            nrows=budget if budget > 0 else None, usecols=usecols,
+        )
+        if isinstance(reader, pd.DataFrame):
+            yield reader
+            return
+        try:
+            yield from reader
+        finally:
+            reader.close()
 
     parts: list[pd.DataFrame] = []
-    seen = 0
     try:
         for chunk in _chunks(lambda c: c in wanted):
             g = _netflow_frame_to_agg(chunk, ds, cfg)
             if not g.empty:
                 parts.append(g)
-            seen += len(chunk)
-            if budget > 0 and seen >= budget:
-                log.warning("netflow: 达到 max_netflow_rows=%d 上限，后续行未读取"
-                            "（设为 0 可读全量）", budget)
-                break
     except Exception as exc:
         log.warning("netflow 分块读取失败，退回不带 usecols 的单遍读取: %s", exc)
         parts = []
@@ -358,7 +356,13 @@ def build_point_table(ds: DatasetInfo, cfg: PipelineConfig) -> tuple[pd.DataFram
                 part = part.copy()
                 part["region"] = part["region"].astype(str)
             keys = ["timestamp_bin", "region", "node", "node_type"]
-            if all(k in part.columns for k in keys):
+            if agg_fn is _agg_netflow:
+                # DatasetInfo already scopes the region. NetFlow's region_code
+                # and missing/uppercase node_type do not match node_metrics.
+                keys = ["timestamp_bin", "node"]
+                part = part.drop(columns=["region", "node_type"], errors="ignore")
+                point = point.merge(part, on=keys, how="left", validate="many_to_one")
+            elif all(k in part.columns for k in keys):
                 point = point.merge(part, on=keys, how="left")
             elif "timestamp_bin" in part.columns:
                 point = point.merge(part, on="timestamp_bin", how="left")
