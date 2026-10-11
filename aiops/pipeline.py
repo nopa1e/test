@@ -463,7 +463,16 @@ def run_all(
             results.append({"dataset": ds.name, "error": str(exc)})
 
     out_root = ensure_dir(Path(cfg.output_dir) / "_all")
-    dump_json(out_root / "run_summary.json", {"config": cfg.to_dict(), "results": results})
+    failed = [r["dataset"] for r in results if "error" in r]
+    dump_json(
+        out_root / "run_summary.json",
+        {
+            "config": cfg.to_dict(),
+            "results": results,
+            "status": "failed" if failed else "success",
+            "failed_datasets": failed,
+        },
+    )
     dump_json(
         out_root / "experiment_summary.json",
         {
@@ -472,6 +481,13 @@ def run_all(
             "experiments": [r.get("experiment") for r in results if isinstance(r, dict) and r.get("experiment")],
         },
     )
+    if failed:
+        # Keep successful per-region artifacts and the full failure report,
+        # but do not publish an incomplete aggregate or report exit success.
+        raise RuntimeError(
+            f"{len(failed)}/{len(datasets)} datasets failed: {', '.join(failed)}; "
+            f"see {out_root / 'run_summary.json'}"
+        )
     with (out_root / "predictions.jsonl").open("w", encoding="utf-8") as f:
         for r in results:
             if "prediction" in r:
